@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Story, Character, Location, StoryAsset, Shot
+from .models import Story, Character, Location, StoryAsset, Sequence, Shot
 
 
 @admin.register(Story)
@@ -28,6 +28,13 @@ class StoryAssetAdmin(admin.ModelAdmin):
     list_display = ['name', 'story', 'asset_type', 'complexity']
     list_filter = ['asset_type', 'complexity']
     search_fields = ['name']
+
+
+@admin.register(Sequence)
+class SequenceAdmin(admin.ModelAdmin):
+    list_display = ['sequence_number', 'title', 'story', 'total_shots', 'estimated_time']
+    list_filter = ['story']
+    search_fields = ['title', 'description']
 
 
 @admin.register(Shot)

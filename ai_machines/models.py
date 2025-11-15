@@ -72,8 +72,27 @@ class StoryAsset(models.Model):
         return f"{self.name} ({self.story.title})"
 
 
+class Sequence(models.Model):
+    """Sequence extracted from story - A sequence contains multiple shots"""
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='sequences')
+    sequence_number = models.IntegerField()
+    title = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    location = models.ForeignKey(Location, on_delete=models.SET_NULL, null=True, blank=True, related_name='sequences')
+    characters = models.ManyToManyField(Character, related_name='sequences', blank=True)
+    estimated_time = models.CharField(max_length=100, blank=True)
+    total_shots = models.IntegerField(default=0)
+    
+    class Meta:
+        db_table = 'story_sequences'
+        ordering = ['sequence_number']
+    
+    def __str__(self):
+        return f"Sequence {self.sequence_number} - {self.story.title}"
+
+
 class Shot(models.Model):
-    """Shot extracted from story"""
+    """Shot extracted from story - Individual camera shots within a sequence"""
     COMPLEXITY_CHOICES = [
         ('low', 'Low'),
         ('medium', 'Medium'),
@@ -81,6 +100,7 @@ class Shot(models.Model):
     ]
     
     story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='shots')
+    sequence = models.ForeignKey(Sequence, on_delete=models.CASCADE, related_name='shots', null=True, blank=True)
     shot_number = models.IntegerField()
     description = models.TextField()
     characters = models.ManyToManyField(Character, related_name='shots', blank=True)

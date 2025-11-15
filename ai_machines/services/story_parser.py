@@ -32,6 +32,7 @@ def parse_story_to_structured_data(story_text):
             "characters": [],
             "locations": [],
             "assets": [],
+            "sequences": [],
             "shots": []
         }
     
@@ -41,10 +42,15 @@ def parse_story_to_structured_data(story_text):
             "characters": [],
             "locations": [],
             "assets": [],
+            "sequences": [],
             "shots": []
         }
     
     prompt = f"""You are a professional script analyzer for 3D production and animation.
+
+IMPORTANT: Understand that SEQUENCES and SHOTS are two different things:
+- SEQUENCE: A group of related shots that form a complete scene or narrative unit (like a scene in a movie)
+- SHOT: An individual camera shot within a sequence (a single camera take)
 
 Analyze this story/script and extract structured data in JSON format:
 
@@ -76,22 +82,42 @@ Return a JSON object with this exact structure:
             "complexity": "low/medium/high"
         }}
     ],
+    "sequences": [
+        {{
+            "sequence_number": 1,
+            "title": "sequence title or name",
+            "description": "what happens in this sequence (the overall scene/narrative unit)",
+            "location": "location name",
+            "characters": ["character names in this sequence"],
+            "estimated_time": "time estimate for entire sequence",
+            "total_shots": number of shots in this sequence
+        }}
+    ],
     "shots": [
         {{
             "shot_number": 1,
-            "description": "what happens in this shot",
-            "characters": ["character names"],
+            "sequence_number": 1,
+            "description": "what happens in this specific shot (individual camera take)",
+            "characters": ["character names in this shot"],
             "location": "location name",
             "camera_angle": "close-up/wide/medium/etc",
             "complexity": "low/medium/high",
-            "estimated_time": "time estimate like '1-2 days'",
+            "estimated_time": "time estimate for this shot like '1-2 days'",
             "special_requirements": ["any special effects or requirements"]
         }}
     ],
     "summary": "brief summary of the story",
+    "total_sequences": number,
     "total_shots": number,
     "estimated_total_time": "overall time estimate"
 }}
+
+CRITICAL: 
+- Each SHOT must belong to a SEQUENCE (use sequence_number to link them)
+- SEQUENCES are higher level - they group related shots together
+- SHOTS are individual camera takes within sequences
+- A sequence can have multiple shots
+- Extract both sequences AND shots separately
 
 Be thorough and extract all details. Return ONLY valid JSON, no additional text."""
 
@@ -158,6 +184,7 @@ Be thorough and extract all details. Return ONLY valid JSON, no additional text.
             "characters": [],
             "locations": [],
             "assets": [],
+            "sequences": [],
             "shots": []
         }
     except Exception as e:
@@ -166,5 +193,6 @@ Be thorough and extract all details. Return ONLY valid JSON, no additional text.
             "characters": [],
             "locations": [],
             "assets": [],
+            "sequences": [],
             "shots": []
         }
