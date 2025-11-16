@@ -116,3 +116,248 @@ class Shot(models.Model):
     
     def __str__(self):
         return f"Shot {self.shot_number} - {self.story.title}"
+
+
+class ArtControlSettings(models.Model):
+    """Art control settings for a story, sequence, or shot"""
+    # Can be attached to story, sequence, or shot (exactly one must be set)
+    story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='art_control', null=True, blank=True)
+    sequence = models.ForeignKey(Sequence, on_delete=models.CASCADE, related_name='art_control', null=True, blank=True)
+    shot = models.ForeignKey(Shot, on_delete=models.CASCADE, related_name='art_control', null=True, blank=True)
+    
+    # Color Palette
+    primary_colors = models.JSONField(default=list)  # [{"name": "Hero Blue", "hex": "#1E88E5", "usage": "primary"}]
+    color_mood = models.CharField(
+        max_length=50,
+        choices=[
+            ('warm', 'Warm'),
+            ('cool', 'Cool'),
+            ('neutral', 'Neutral'),
+        ],
+        default='neutral'
+    )
+    color_saturation = models.CharField(
+        max_length=50,
+        choices=[
+            ('high', 'High Saturation'),
+            ('medium', 'Medium Saturation'),
+            ('low', 'Low Saturation'),
+            ('desaturated', 'Desaturated'),
+        ],
+        default='medium'
+    )
+    color_contrast = models.CharField(
+        max_length=50,
+        choices=[
+            ('high', 'High Contrast'),
+            ('medium', 'Medium Contrast'),
+            ('low', 'Low Contrast'),
+        ],
+        default='medium'
+    )
+    forbidden_colors = models.JSONField(default=list)  # Hex codes to avoid
+    
+    # Composition
+    composition_style = models.CharField(
+        max_length=50,
+        choices=[
+            ('rule_of_thirds', 'Rule of Thirds'),
+            ('symmetrical', 'Symmetrical'),
+            ('asymmetrical', 'Asymmetrical'),
+            ('centered', 'Centered'),
+            ('dynamic', 'Dynamic'),
+        ],
+        default='rule_of_thirds'
+    )
+    preferred_shot_types = models.JSONField(default=list)  # ['wide', 'medium', 'close-up']
+    
+    # Camera Guidelines
+    handheld_allowed = models.BooleanField(default=False)
+    stable_camera_allowed = models.BooleanField(default=True)
+    gimbal_allowed = models.BooleanField(default=True)
+    drone_allowed = models.BooleanField(default=False)
+    static_camera_allowed = models.BooleanField(default=True)
+    
+    # Lens Guidelines
+    wide_angle_allowed = models.BooleanField(default=True)
+    standard_lens_preferred = models.BooleanField(default=True)
+    telephoto_allowed = models.BooleanField(default=True)
+    macro_allowed = models.BooleanField(default=False)
+    fisheye_allowed = models.BooleanField(default=False)
+    
+    # Camera Movement
+    static_shots_only = models.BooleanField(default=False)
+    panning_allowed = models.BooleanField(default=True)
+    tracking_allowed = models.BooleanField(default=True)
+    zoom_allowed = models.BooleanField(default=True)
+    dolly_shots_allowed = models.BooleanField(default=True)
+    
+    # Visual Style
+    art_style = models.CharField(
+        max_length=50,
+        choices=[
+            ('realistic', 'Realistic'),
+            ('stylized', 'Stylized'),
+            ('cartoon', 'Cartoon'),
+            ('anime', 'Anime'),
+            ('watercolor', 'Watercolor'),
+            ('oil_painting', 'Oil Painting'),
+            ('digital_art', 'Digital Art'),
+        ],
+        default='realistic'
+    )
+    detail_level = models.CharField(
+        max_length=50,
+        choices=[
+            ('high', 'High Detail'),
+            ('medium', 'Medium Detail'),
+            ('low', 'Low Detail'),
+        ],
+        default='medium'
+    )
+    lighting_style = models.CharField(
+        max_length=50,
+        choices=[
+            ('natural', 'Natural Lighting'),
+            ('dramatic', 'Dramatic Lighting'),
+            ('soft', 'Soft Lighting'),
+            ('high_key', 'High Key'),
+            ('low_key', 'Low Key'),
+        ],
+        default='natural'
+    )
+    
+    # Animation Style
+    animation_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('smooth', 'Smooth/Realistic'),
+            ('stylized', 'Stylized/Exaggerated'),
+            ('stop_motion', 'Stop-Motion Style'),
+            ('2d_style', '2D Animation Style'),
+        ],
+        default='smooth'
+    )
+    motion_preference = models.CharField(
+        max_length=50,
+        choices=[
+            ('fast', 'Fast-Paced'),
+            ('slow', 'Slow and Deliberate'),
+            ('natural', 'Natural Timing'),
+            ('exaggerated', 'Exaggerated Timing'),
+        ],
+        default='natural'
+    )
+    
+    # Reference Images
+    style_reference_images = models.JSONField(default=list)  # URLs to reference images
+    mood_board_images = models.JSONField(default=list)  # Enhanced mood board with multiple reference images
+    
+    # Story Level Only - Technical Specifications
+    frame_rate = models.CharField(
+        max_length=20,
+        choices=[
+            ('24', '24 fps (Cinematic)'),
+            ('30', '30 fps (Standard)'),
+            ('60', '60 fps (Smooth)'),
+            ('120', '120 fps (High Frame Rate)'),
+        ],
+        default='24',
+        blank=True,
+        null=True
+    )
+    resolution = models.CharField(
+        max_length=20,
+        choices=[
+            ('1080p', '1080p (Full HD)'),
+            ('2K', '2K (1440p)'),
+            ('4K', '4K (2160p)'),
+            ('8K', '8K (4320p)'),
+        ],
+        default='1080p',
+        blank=True,
+        null=True
+    )
+    
+    # Aspect Ratio (story level only, but can be set at any level)
+    aspect_ratio = models.CharField(
+        max_length=20,
+        choices=[
+            ('16:9', '16:9 (Widescreen)'),
+            ('21:9', '21:9 (Ultrawide)'),
+            ('4:3', '4:3 (Standard)'),
+            ('1:1', '1:1 (Square)'),
+            ('9:16', '9:16 (Portrait)'),
+            ('custom', 'Custom'),
+        ],
+        default='16:9',
+        blank=True
+    )
+    custom_aspect_ratio = models.CharField(max_length=20, blank=True)  # e.g., "2.35:1"
+    
+    # Sequence/Shot Level - Environment & Timing
+    atmosphere = models.CharField(
+        max_length=50,
+        choices=[
+            ('foggy', 'Foggy'),
+            ('clear', 'Clear'),
+            ('dusty', 'Dusty'),
+            ('ethereal', 'Ethereal'),
+            ('misty', 'Misty'),
+            ('hazy', 'Hazy'),
+            ('crisp', 'Crisp'),
+        ],
+        blank=True,
+        null=True
+    )
+    time_of_day = models.CharField(
+        max_length=50,
+        choices=[
+            ('dawn', 'Dawn'),
+            ('day', 'Day'),
+            ('dusk', 'Dusk'),
+            ('night', 'Night'),
+            ('golden_hour', 'Golden Hour'),
+            ('blue_hour', 'Blue Hour'),
+        ],
+        blank=True,
+        null=True
+    )
+    shot_duration = models.CharField(
+        max_length=50,
+        choices=[
+            ('fast_paced', 'Fast-Paced (Quick Cuts)'),
+            ('standard', 'Standard'),
+            ('slow_paced', 'Slow-Paced (Long Takes)'),
+        ],
+        blank=True,
+        null=True
+    )
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    class Meta:
+        db_table = 'art_control_settings'
+        ordering = ['-updated_at']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (models.Q(story__isnull=False) & models.Q(sequence__isnull=True) & models.Q(shot__isnull=True)) |
+                    (models.Q(story__isnull=True) & models.Q(sequence__isnull=False) & models.Q(shot__isnull=True)) |
+                    (models.Q(story__isnull=True) & models.Q(sequence__isnull=True) & models.Q(shot__isnull=False))
+                ),
+                name='exactly_one_parent'
+            )
+        ]
+    
+    def __str__(self):
+        if self.story:
+            return f"Art Control - Story: {self.story.title}"
+        elif self.sequence:
+            return f"Art Control - Sequence {self.sequence.sequence_number}"
+        elif self.shot:
+            return f"Art Control - Shot {self.shot.shot_number}"
+        return "Art Control - Unknown"

@@ -2,8 +2,10 @@ from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.conf import settings
-from .models import Story, Character, Location, StoryAsset, Sequence, Shot
+from django.shortcuts import get_object_or_404
+from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings
 from .services.story_parser import parse_story_to_structured_data
+from .serializers import ArtControlSettingsSerializer
 
 
 @api_view(['POST'])
@@ -77,6 +79,7 @@ def parse_story(request):
         
         # Create sequences first
         sequences_dict = {}
+        sequences_with_ids = {}  # Store sequence objects with their IDs for later
         for seq_data in parsed_data.get('sequences', []):
             location = None
             location_name = seq_data.get('location', '')
@@ -99,9 +102,12 @@ def parse_story(request):
                 characters = Character.objects.filter(story=story, name__in=char_names)
                 sequence.characters.set(characters)
             
-            sequences_dict[seq_data.get('sequence_number', 1)] = sequence
+            seq_num = seq_data.get('sequence_number', 1)
+            sequences_dict[seq_num] = sequence
+            sequences_with_ids[seq_num] = sequence.id  # Store the ID directly
         
         # Create shots and link to sequences
+        shots_with_ids = {}  # Store shot objects with their IDs for later
         for shot_data in parsed_data.get('shots', []):
             location = None
             location_name = shot_data.get('location', '')
@@ -131,17 +137,399 @@ def parse_story(request):
             if char_names:
                 characters = Character.objects.filter(story=story, name__in=char_names)
                 shot.characters.set(characters)
+            
+            shot_num = shot_data.get('shot_number', 1)
+            shots_with_ids[shot_num] = shot.id  # Store the ID directly
         
-        return Response({
+        # Add sequence and shot IDs to parsed data for frontend navigation
+        # Use the IDs we just created instead of querying the database
+        import copy
+        enhanced_parsed_data = copy.deepcopy(parsed_data)
+        
+        # Add IDs to sequences - use the IDs we stored when creating them
+        for seq in enhanced_parsed_data.get('sequences', []):
+            seq_num = seq.get('sequence_number', 1)
+            # Try multiple type conversions to ensure we find the match
+            seq_id = None
+            if seq_num in sequences_with_ids:
+                seq_id = sequences_with_ids[seq_num]
+            elif int(seq_num) in sequences_with_ids:
+                seq_id = sequences_with_ids[int(seq_num)]
+            elif str(seq_num) in sequences_with_ids:
+                seq_id = sequences_with_ids[str(seq_num)]
+            
+            if seq_id:
+                seq['id'] = seq_id
+                print(f"DEBUG: Added ID {seq_id} to sequence {seq_num}")
+            else:
+                print(f"DEBUG: WARNING - Could not find ID for sequence {seq_num} (type: {type(seq_num)}). Available keys: {list(sequences_with_ids.keys())}")
+        
+        # Add IDs to shots - use the IDs we stored when creating them
+        for shot in enhanced_parsed_data.get('shots', []):
+            shot_num = shot.get('shot_number', 1)
+            # Try multiple type conversions to ensure we find the match
+            shot_id = None
+            if shot_num in shots_with_ids:
+                shot_id = shots_with_ids[shot_num]
+            elif int(shot_num) in shots_with_ids:
+                shot_id = shots_with_ids[int(shot_num)]
+            elif str(shot_num) in shots_with_ids:
+                shot_id = shots_with_ids[str(shot_num)]
+            
+            if shot_id:
+                shot['id'] = shot_id
+                print(f"DEBUG: Added ID {shot_id} to shot {shot_num}")
+            else:
+                print(f"DEBUG: WARNING - Could not find ID for shot {shot_num} (type: {type(shot_num)}). Available keys: {list(shots_with_ids.keys())}")
+        
+        # Debug: Print what IDs we're adding (for immediate visibility)
+        print(f"DEBUG: sequences_with_ids = {sequences_with_ids}")
+        print(f"DEBUG: shots_with_ids = {shots_with_ids}")
+        print(f"DEBUG: enhanced_parsed_data sequences = {[s.get('sequence_number') for s in enhanced_parsed_data.get('sequences', [])]}")
+        print(f"DEBUG: enhanced_parsed_data shots = {[s.get('shot_number') for s in enhanced_parsed_data.get('shots', [])]}")
+        
+        # Check if IDs were actually added to enhanced_parsed_data
+        sequences_with_ids_check = [s.get('id') for s in enhanced_parsed_data.get('sequences', []) if s.get('id')]
+        shots_with_ids_check = [s.get('id') for s in enhanced_parsed_data.get('shots', []) if s.get('id')]
+        print(f"DEBUG: Sequences in enhanced_parsed_data WITH IDs: {sequences_with_ids_check}")
+        print(f"DEBUG: Shots in enhanced_parsed_data WITH IDs: {shots_with_ids_check}")
+        
+        # Convert dictionary keys to strings for JSON serialization
+        # JSON requires string keys, so convert int keys to strings
+        sequence_ids_str = {str(k): v for k, v in sequences_with_ids.items()}
+        shot_ids_str = {str(k): v for k, v in shots_with_ids.items()}
+        
+        print(f"DEBUG: sequence_ids_str (after string conversion) = {sequence_ids_str}")
+        print(f"DEBUG: shot_ids_str (after string conversion) = {shot_ids_str}")
+        
+        # Also add IDs at top level for easier access (like story_id)
+        response_data = {
             'story_id': story.id,
-            'parsed_data': parsed_data,
-            'message': 'Story parsed successfully'
-        }, status=status.HTTP_200_OK)
+            'parsed_data': enhanced_parsed_data,
+            'message': 'Story parsed successfully',
+            'sequence_ids': sequence_ids_str,  # Map of sequence_number (string) -> id
+            'shot_ids': shot_ids_str,  # Map of shot_number (string) -> id
+        }
+        
+        print(f"DEBUG: response_data sequence_ids = {response_data['sequence_ids']}")
+        print(f"DEBUG: response_data shot_ids = {response_data['shot_ids']}")
+        print(f"DEBUG: response_data['parsed_data']['sequences'] with IDs = {[(s.get('sequence_number'), s.get('id')) for s in response_data['parsed_data'].get('sequences', [])]}")
+        print(f"DEBUG: response_data['parsed_data']['shots'] with IDs = {[(s.get('shot_number'), s.get('id')) for s in response_data['parsed_data'].get('shots', [])]}")
+        
+        return Response(response_data, status=status.HTTP_200_OK)
         
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
         return Response(
             {'error': f'Error processing story: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET', 'POST', 'PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def art_control_settings(request, story_id):
+    """
+    Get, create, or update art control settings for a story
+    GET /api/ai-machines/stories/{story_id}/art-control/
+    POST /api/ai-machines/stories/{story_id}/art-control/
+    PUT /api/ai-machines/stories/{story_id}/art-control/
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        
+        if request.method == 'GET':
+            # Get existing settings or return defaults
+            art_control, created = ArtControlSettings.objects.get_or_create(
+                story=story,
+                defaults={'created_by': request.user}
+            )
+            serializer = ArtControlSettingsSerializer(art_control)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        elif request.method == 'POST':
+            # Create new settings
+            if ArtControlSettings.objects.filter(story=story).exists():
+                return Response(
+                    {'error': 'Art control settings already exist. Use PUT to update.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            serializer = ArtControlSettingsSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save(story=story, created_by=request.user)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        elif request.method == 'PUT':
+            # Update existing settings
+            art_control, created = ArtControlSettings.objects.get_or_create(
+                story=story,
+                defaults={'created_by': request.user}
+            )
+            serializer = ArtControlSettingsSerializer(art_control, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error processing art control settings: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def reset_art_control_settings(request, story_id):
+    """
+    Reset art control settings to defaults
+    DELETE /api/ai-machines/stories/{story_id}/art-control/
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        art_control = get_object_or_404(ArtControlSettings, story=story)
+        
+        # Reset to defaults by deleting and recreating
+        art_control.delete()
+        new_art_control = ArtControlSettings.objects.create(
+            story=story,
+            created_by=request.user
+        )
+        serializer = ArtControlSettingsSerializer(new_art_control)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except ArtControlSettings.DoesNotExist:
+        return Response(
+            {'error': 'Art control settings not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error resetting art control settings: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+def merge_art_control_settings(*settings_objects):
+    """
+    Merge art control settings with inheritance.
+    Lower level settings override higher level settings.
+    Missing values are inherited from higher levels.
+    """
+    if not settings_objects:
+        return {}
+    
+    # Start with the first (highest level) settings
+    merged = {}
+    serializer = ArtControlSettingsSerializer(settings_objects[0])
+    merged = serializer.data.copy()
+    
+    # Override with lower level settings (skip None/empty values for inheritance)
+    for settings_obj in settings_objects[1:]:
+        serializer = ArtControlSettingsSerializer(settings_obj)
+        data = serializer.data
+        
+        # Merge: lower level overrides higher level if value exists
+        for key, value in data.items():
+            # Skip metadata fields
+            if key in ['id', 'created_at', 'updated_at', 'story_id', 'story_title', 'sequence_id', 'shot_id']:
+                continue
+            
+            # For JSON fields (lists), merge if not empty
+            if isinstance(value, list):
+                if value:  # If list has items, use it
+                    merged[key] = value
+            # For string fields that can be None (atmosphere, time_of_day, shot_duration)
+            # Special handling: if value is explicitly None, it means "no restriction" - don't inherit
+            elif key in ['atmosphere', 'time_of_day', 'shot_duration']:
+                if value is None:
+                    # Explicitly set to None means "no restriction" - override inheritance
+                    merged[key] = None
+                elif value != '':
+                    # Has a specific value - use it
+                    merged[key] = value
+                # If empty string, inherit from higher level (don't override)
+            # For other string fields, use if not None and not empty
+            elif value is not None and value != '':
+                merged[key] = value
+            # For boolean fields, always use the value
+            elif isinstance(value, bool):
+                merged[key] = value
+    
+    return merged
+
+
+@api_view(['GET', 'POST', 'PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def sequence_art_control_settings(request, story_id, sequence_id):
+    """
+    Get, create, or update art control settings for a sequence
+    GET /api/ai-machines/stories/{story_id}/sequences/{sequence_id}/art-control/
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        sequence = get_object_or_404(Sequence, id=sequence_id, story=story)
+        
+        if request.method == 'GET':
+            # Get story-level settings (for inheritance)
+            story_settings, _ = ArtControlSettings.objects.get_or_create(
+                story=story,
+                defaults={'created_by': request.user}
+            )
+            
+            # Get sequence-level settings
+            sequence_settings, created = ArtControlSettings.objects.get_or_create(
+                sequence=sequence,
+                defaults={'created_by': request.user}
+            )
+            
+            # Merge with inheritance: story -> sequence
+            merged_data = merge_art_control_settings(story_settings, sequence_settings)
+            
+            # Add metadata
+            merged_data['id'] = sequence_settings.id
+            merged_data['sequence_id'] = sequence.id
+            merged_data['story_id'] = story.id
+            merged_data['story_title'] = story.title
+            
+            return Response(merged_data, status=status.HTTP_200_OK)
+        
+        elif request.method == 'POST':
+            if ArtControlSettings.objects.filter(sequence=sequence).exists():
+                return Response(
+                    {'error': 'Art control settings already exist. Use PUT to update.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            serializer = ArtControlSettingsSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save(sequence=sequence, created_by=request.user)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        elif request.method == 'PUT':
+            art_control, created = ArtControlSettings.objects.get_or_create(
+                sequence=sequence,
+                defaults={'created_by': request.user}
+            )
+            serializer = ArtControlSettingsSerializer(art_control, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    except (Story.DoesNotExist, Sequence.DoesNotExist):
+        return Response(
+            {'error': 'Story or Sequence not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error processing art control settings: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET', 'POST', 'PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def shot_art_control_settings(request, story_id, shot_id):
+    """
+    Get, create, or update art control settings for a shot
+    GET /api/ai-machines/stories/{story_id}/shots/{shot_id}/art-control/
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        shot = get_object_or_404(Shot, id=shot_id, story=story)
+        
+        if request.method == 'GET':
+            # Get story-level settings (for inheritance)
+            story_settings, _ = ArtControlSettings.objects.get_or_create(
+                story=story,
+                defaults={'created_by': request.user}
+            )
+            
+            # Get sequence-level settings (if shot has a sequence)
+            sequence_settings = None
+            if shot.sequence:
+                sequence_settings, _ = ArtControlSettings.objects.get_or_create(
+                    sequence=shot.sequence,
+                    defaults={'created_by': request.user}
+                )
+            
+            # Get shot-level settings
+            shot_settings, created = ArtControlSettings.objects.get_or_create(
+                shot=shot,
+                defaults={'created_by': request.user}
+            )
+            
+            # Merge with inheritance: story -> sequence -> shot
+            if sequence_settings:
+                merged_data = merge_art_control_settings(story_settings, sequence_settings, shot_settings)
+            else:
+                merged_data = merge_art_control_settings(story_settings, shot_settings)
+            
+            # Add metadata
+            merged_data['id'] = shot_settings.id
+            merged_data['shot_id'] = shot.id
+            merged_data['story_id'] = story.id
+            merged_data['story_title'] = story.title
+            if shot.sequence:
+                merged_data['sequence_id'] = shot.sequence.id
+            
+            return Response(merged_data, status=status.HTTP_200_OK)
+        
+        elif request.method == 'POST':
+            if ArtControlSettings.objects.filter(shot=shot).exists():
+                return Response(
+                    {'error': 'Art control settings already exist. Use PUT to update.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            serializer = ArtControlSettingsSerializer(data=request.data)
+            if serializer.is_valid():
+                serializer.save(shot=shot, created_by=request.user)
+                return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        elif request.method == 'PUT':
+            art_control, created = ArtControlSettings.objects.get_or_create(
+                shot=shot,
+                defaults={'created_by': request.user}
+            )
+            serializer = ArtControlSettingsSerializer(art_control, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    except (Story.DoesNotExist, Shot.DoesNotExist):
+        return Response(
+            {'error': 'Story or Shot not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error processing art control settings: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
