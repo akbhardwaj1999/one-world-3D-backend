@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Story, ArtControlSettings
+from .models import Story, ArtControlSettings, Chat
 
 
 class ArtControlSettingsSerializer(serializers.ModelSerializer):
@@ -69,3 +69,18 @@ class ArtControlSettingsSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ChatSerializer(serializers.ModelSerializer):
+    """Serializer for Chat"""
+    
+    class Meta:
+        model = Chat
+        fields = ['id', 'title', 'messages', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate_messages(self, value):
+        """Validate messages is a list"""
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Messages must be a list")
+        return value

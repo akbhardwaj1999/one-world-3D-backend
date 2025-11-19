@@ -13,6 +13,8 @@ class Story(models.Model):
     summary = models.TextField(blank=True)
     total_shots = models.IntegerField(default=0)
     estimated_total_time = models.CharField(max_length=100, blank=True)
+    total_estimated_cost = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    budget_range = models.CharField(max_length=50, blank=True)  # e.g., "$50k-$100k"
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -63,6 +65,8 @@ class StoryAsset(models.Model):
     asset_type = models.CharField(max_length=50)  # model, prop, environment, effect
     description = models.TextField(blank=True)
     complexity = models.CharField(max_length=20, default='medium')  # low, medium, high
+    estimated_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    cost_per_hour = models.DecimalField(max_digits=8, decimal_places=2, default=100.00)
     
     class Meta:
         db_table = 'story_assets'
@@ -82,6 +86,7 @@ class Sequence(models.Model):
     characters = models.ManyToManyField(Character, related_name='sequences', blank=True)
     estimated_time = models.CharField(max_length=100, blank=True)
     total_shots = models.IntegerField(default=0)
+    estimated_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     
     class Meta:
         db_table = 'story_sequences'
@@ -109,6 +114,8 @@ class Shot(models.Model):
     complexity = models.CharField(max_length=20, choices=COMPLEXITY_CHOICES, default='medium')
     estimated_time = models.CharField(max_length=100, blank=True)
     special_requirements = models.JSONField(default=list, blank=True)
+    estimated_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    labor_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     
     class Meta:
         db_table = 'story_shots'
@@ -361,3 +368,19 @@ class ArtControlSettings(models.Model):
         elif self.shot:
             return f"Art Control - Shot {self.shot.shot_number}"
         return "Art Control - Unknown"
+
+
+class Chat(models.Model):
+    """Chat Model - Stores user chat conversations"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chats')
+    title = models.CharField(max_length=255, default='New Chat')
+    messages = models.JSONField(default=list)  # List of message objects
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'chats'
+        ordering = ['-updated_at']
+    
+    def __str__(self):
+        return f"{self.title} - {self.user.username}"

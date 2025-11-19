@@ -3,9 +3,16 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings
+from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat
 from .services.story_parser import parse_story_to_structured_data
-from .serializers import ArtControlSettingsSerializer
+from .services.cost_calculator import (
+    calculate_asset_cost,
+    calculate_shot_cost,
+    calculate_sequence_cost,
+    calculate_story_total_cost,
+    get_budget_range
+)
+from .serializers import ArtControlSettingsSerializer, ChatSerializer
 
 
 @api_view(['POST'])
@@ -68,14 +75,18 @@ def parse_story(request):
                 scenes=loc_data.get('scenes', 0)
             )
         
+        # Create assets and calculate costs
         for asset_data in parsed_data.get('assets', []):
-            StoryAsset.objects.create(
+            asset = StoryAsset.objects.create(
                 story=story,
                 name=asset_data.get('name', '')[:255],
                 asset_type=asset_data.get('type', 'prop')[:50],
                 description=asset_data.get('description', ''),
                 complexity=asset_data.get('complexity', 'medium')[:20]
             )
+            # Calculate and save asset cost
+            asset.estimated_cost = calculate_asset_cost(asset)
+            asset.save()
         
         # Create sequences first
         sequences_dict = {}
@@ -131,6 +142,10 @@ def parse_story(request):
                 estimated_time=shot_data.get('estimated_time', '')[:100],
                 special_requirements=shot_data.get('special_requirements', [])
             )
+            
+            # Calculate and save shot cost
+            shot.estimated_cost = calculate_shot_cost(shot)
+            shot.save()
             
             # Link characters to shot
             char_names = shot_data.get('characters', [])
@@ -201,6 +216,38 @@ def parse_story(request):
         
         print(f"DEBUG: sequence_ids_str (after string conversion) = {sequence_ids_str}")
         print(f"DEBUG: shot_ids_str (after string conversion) = {shot_ids_str}")
+        
+        # Calculate costs for sequences (sum of shot costs)
+        for sequence in sequences_dict.values():
+            sequence.estimated_cost = calculate_sequence_cost(sequence)
+            sequence.save()
+        
+        # Calculate total story cost and budget range
+        story.total_estimated_cost = calculate_story_total_cost(story)
+        story.budget_range = get_budget_range(story.total_estimated_cost)
+        story.save()
+        
+        # Add cost information to enhanced_parsed_data for frontend
+        enhanced_parsed_data['total_estimated_cost'] = float(story.total_estimated_cost) if story.total_estimated_cost else None
+        enhanced_parsed_data['budget_range'] = story.budget_range
+        
+        # Add costs to assets in parsed data
+        for asset in enhanced_parsed_data.get('assets', []):
+            asset_obj = StoryAsset.objects.filter(story=story, name=asset.get('name', '')).first()
+            if asset_obj and asset_obj.estimated_cost:
+                asset['estimated_cost'] = float(asset_obj.estimated_cost)
+        
+        # Add costs to shots in parsed data 
+        for shot in enhanced_parsed_data.get('shots', []):
+            shot_obj = Shot.objects.filter(story=story, shot_number=shot.get('shot_number')).first()
+            if shot_obj and shot_obj.estimated_cost:
+                shot['estimated_cost'] = float(shot_obj.estimated_cost)
+        
+        # Add costs to sequences in parsed data
+        for seq in enhanced_parsed_data.get('sequences', []):
+            seq_obj = Sequence.objects.filter(story=story, sequence_number=seq.get('sequence_number')).first()
+            if seq_obj and seq_obj.estimated_cost:
+                seq['estimated_cost'] = float(seq_obj.estimated_cost)
         
         # Also add IDs at top level for easier access (like story_id)
         response_data = {
