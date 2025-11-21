@@ -274,6 +274,178 @@ def parse_story(request):
         )
 
 
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def story_list(request):
+    """
+    Get all stories for the authenticated user
+    GET /api/ai-machines/stories/
+    
+    Returns:
+    {
+        "stories": [
+            {
+                "id": 1,
+                "title": "Story Title",
+                "summary": "Story summary...",
+                "total_shots": 10,
+                "total_estimated_cost": 45600.00,
+                "budget_range": "$40k-$50k",
+                "estimated_total_time": "2-3 weeks",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z"
+            }
+        ]
+    }
+    """
+    try:
+        stories = Story.objects.filter(user=request.user).order_by('-updated_at')
+        
+        stories_data = []
+        for story in stories:
+            stories_data.append({
+                'id': story.id,
+                'title': story.title,
+                'summary': story.summary[:200] if story.summary else '',  # First 200 chars
+                'total_shots': story.total_shots,
+                'total_estimated_cost': float(story.total_estimated_cost) if story.total_estimated_cost else None,
+                'budget_range': story.budget_range or None,
+                'estimated_total_time': story.estimated_total_time or None,
+                'created_at': story.created_at.isoformat() if story.created_at else None,
+                'updated_at': story.updated_at.isoformat() if story.updated_at else None,
+            })
+        
+        return Response({
+            'stories': stories_data
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error fetching stories: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def story_detail(request, story_id):
+    """
+    Get a single story by ID for the authenticated user
+    GET /api/ai-machines/stories/{story_id}/
+    
+    Returns:
+    {
+        "id": 1,
+        "title": "Story Title",
+        "summary": "Story summary...",
+        "parsed_data": {...},
+        "total_shots": 10,
+        "total_estimated_cost": 45600.00,
+        "budget_range": "$40k-$50k",
+        "estimated_total_time": "2-3 weeks",
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z"
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        
+        # Get parsed_data and enhance it with cost information from database
+        parsed_data = story.parsed_data.copy() if story.parsed_data else {}
+        
+        # Add cost information to parsed_data if missing (for old stories)
+        # Add total cost and budget range
+        if story.total_estimated_cost:
+            parsed_data['total_estimated_cost'] = float(story.total_estimated_cost)
+        if story.budget_range:
+            parsed_data['budget_range'] = story.budget_range
+        
+        # Add costs to assets in parsed_data from database
+        assets_in_parsed = parsed_data.get('assets', [])
+        for asset_data in assets_in_parsed:
+            asset_name = asset_data.get('name', '')
+            asset_type = asset_data.get('type', '')
+            # Find matching asset in database
+            db_asset = StoryAsset.objects.filter(
+                story=story,
+                name=asset_name,
+                asset_type=asset_type
+            ).first()
+            if db_asset and db_asset.estimated_cost:
+                asset_data['estimated_cost'] = float(db_asset.estimated_cost)
+        
+        # Add costs to shots in parsed_data from database
+        shots_in_parsed = parsed_data.get('shots', [])
+        for shot_data in shots_in_parsed:
+            shot_number = shot_data.get('shot_number')
+            sequence_number = shot_data.get('sequence_number')
+            # Find matching shot in database
+            db_shot = None
+            if shot_number and sequence_number:
+                # Try to find by sequence and shot number
+                sequence = Sequence.objects.filter(
+                    story=story,
+                    sequence_number=sequence_number
+                ).first()
+                if sequence:
+                    db_shot = Shot.objects.filter(
+                        sequence=sequence,
+                        shot_number=shot_number
+                    ).first()
+            elif shot_number:
+                # Fallback: find by shot number only
+                db_shot = Shot.objects.filter(
+                    story=story,
+                    shot_number=shot_number
+                ).first()
+            
+            if db_shot and db_shot.estimated_cost:
+                shot_data['estimated_cost'] = float(db_shot.estimated_cost)
+        
+        # Add costs to sequences in parsed_data from database
+        sequences_in_parsed = parsed_data.get('sequences', [])
+        for seq_data in sequences_in_parsed:
+            seq_number = seq_data.get('sequence_number')
+            if seq_number:
+                db_sequence = Sequence.objects.filter(
+                    story=story,
+                    sequence_number=seq_number
+                ).first()
+                if db_sequence and db_sequence.estimated_cost:
+                    seq_data['estimated_cost'] = float(db_sequence.estimated_cost)
+        
+        story_data = {
+            'id': story.id,
+            'title': story.title,
+            'raw_text': story.raw_text or '',  # Original story text
+            'summary': story.summary or '',
+            'parsed_data': parsed_data,  # Enhanced parsed_data with costs
+            'total_shots': story.total_shots,
+            'total_estimated_cost': float(story.total_estimated_cost) if story.total_estimated_cost else None,
+            'budget_range': story.budget_range or None,
+            'estimated_total_time': story.estimated_total_time or None,
+            'created_at': story.created_at.isoformat() if story.created_at else None,
+            'updated_at': story.updated_at.isoformat() if story.updated_at else None,
+        }
+        
+        return Response(story_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error fetching story: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(['GET', 'POST', 'PUT'])
 @permission_classes([permissions.IsAuthenticated])
 def art_control_settings(request, story_id):
