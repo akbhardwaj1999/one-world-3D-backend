@@ -446,6 +446,152 @@ def story_detail(request, story_id):
         )
 
 
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def story_cost_breakdown(request, story_id):
+    """
+    Get detailed cost breakdown for a story
+    GET /api/ai-machines/stories/{story_id}/cost-breakdown/
+    
+    Returns:
+    {
+        "story_id": 1,
+        "total_estimated_cost": 45600.00,
+        "budget_range": "$40k-$50k",
+        "breakdown": {
+            "assets": {
+                "total": 12000.00,
+                "by_type": {
+                    "model": 8000.00,
+                    "prop": 2000.00,
+                    "environment": 2000.00
+                },
+                "items": [
+                    {
+                        "name": "Asset Name",
+                        "type": "model",
+                        "complexity": "high",
+                        "cost": 2000.00
+                    }
+                ]
+            },
+            "shots": {
+                "total": 25000.00,
+                "by_complexity": {
+                    "low": 5000.00,
+                    "medium": 10000.00,
+                    "high": 10000.00
+                },
+                "items": [
+                    {
+                        "shot_number": 1,
+                        "sequence_number": 1,
+                        "complexity": "medium",
+                        "estimated_time": "1-2 days",
+                        "cost": 1500.00
+                    }
+                ]
+            },
+            "sequences": {
+                "total": 25000.00,
+                "items": [
+                    {
+                        "sequence_number": 1,
+                        "title": "Sequence Title",
+                        "cost": 10000.00,
+                        "shot_count": 5
+                    }
+                ]
+            }
+        }
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        
+        # Calculate asset breakdown
+        assets_breakdown = {
+            'total': 0.0,
+            'by_type': {},
+            'items': []
+        }
+        
+        for asset in story.story_assets.all():
+            cost = float(asset.estimated_cost) if asset.estimated_cost else 0.0
+            assets_breakdown['total'] += cost
+            asset_type = asset.asset_type.lower()
+            assets_breakdown['by_type'][asset_type] = assets_breakdown['by_type'].get(asset_type, 0.0) + cost
+            assets_breakdown['items'].append({
+                'name': asset.name,
+                'type': asset.asset_type,
+                'complexity': asset.complexity,
+                'cost': cost
+            })
+        
+        # Calculate shots breakdown
+        shots_breakdown = {
+            'total': 0.0,
+            'by_complexity': {},
+            'items': []
+        }
+        
+        for shot in story.shots.all():
+            cost = float(shot.estimated_cost) if shot.estimated_cost else 0.0
+            shots_breakdown['total'] += cost
+            complexity = shot.complexity.lower()
+            shots_breakdown['by_complexity'][complexity] = shots_breakdown['by_complexity'].get(complexity, 0.0) + cost
+            shots_breakdown['items'].append({
+                'shot_number': shot.shot_number,
+                'sequence_number': shot.sequence.sequence_number if shot.sequence else None,
+                'complexity': shot.complexity,
+                'estimated_time': shot.estimated_time or 'N/A',
+                'cost': cost
+            })
+        
+        # Calculate sequences breakdown
+        sequences_breakdown = {
+            'total': 0.0,
+            'items': []
+        }
+        
+        for sequence in story.sequences.all():
+            cost = float(sequence.estimated_cost) if sequence.estimated_cost else 0.0
+            sequences_breakdown['total'] += cost
+            sequences_breakdown['items'].append({
+                'sequence_number': sequence.sequence_number,
+                'title': sequence.title or f'Sequence {sequence.sequence_number}',
+                'cost': cost,
+                'shot_count': sequence.shots.count() if hasattr(sequence, 'shots') else 0
+            })
+        
+        response_data = {
+            'story_id': story.id,
+            'story_title': story.title,
+            'total_estimated_cost': float(story.total_estimated_cost) if story.total_estimated_cost else 0.0,
+            'budget_range': story.budget_range or None,
+            'breakdown': {
+                'assets': assets_breakdown,
+                'shots': shots_breakdown,
+                'sequences': sequences_breakdown
+            }
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error fetching cost breakdown: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(['GET', 'POST', 'PUT'])
 @permission_classes([permissions.IsAuthenticated])
 def art_control_settings(request, story_id):
