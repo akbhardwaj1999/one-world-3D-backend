@@ -362,7 +362,19 @@ def story_detail(request, story_id):
         if story.budget_range:
             parsed_data['budget_range'] = story.budget_range
         
-        # Add costs to assets in parsed_data from database
+        # Add IDs and costs to characters in parsed_data from database
+        characters_in_parsed = parsed_data.get('characters', [])
+        for char_data in characters_in_parsed:
+            char_name = char_data.get('name', '')
+            # Find matching character in database
+            db_character = Character.objects.filter(
+                story=story,
+                name=char_name
+            ).first()
+            if db_character:
+                char_data['id'] = db_character.id  # Add character ID
+        
+        # Add IDs and costs to assets in parsed_data from database
         assets_in_parsed = parsed_data.get('assets', [])
         for asset_data in assets_in_parsed:
             asset_name = asset_data.get('name', '')
@@ -373,10 +385,12 @@ def story_detail(request, story_id):
                 name=asset_name,
                 asset_type=asset_type
             ).first()
-            if db_asset and db_asset.estimated_cost:
-                asset_data['estimated_cost'] = float(db_asset.estimated_cost)
+            if db_asset:
+                asset_data['id'] = db_asset.id  # Add asset ID
+                if db_asset.estimated_cost:
+                    asset_data['estimated_cost'] = float(db_asset.estimated_cost)
         
-        # Add costs to shots in parsed_data from database
+        # Add IDs and costs to shots in parsed_data from database
         shots_in_parsed = parsed_data.get('shots', [])
         for shot_data in shots_in_parsed:
             shot_number = shot_data.get('shot_number')
@@ -401,10 +415,12 @@ def story_detail(request, story_id):
                     shot_number=shot_number
                 ).first()
             
-            if db_shot and db_shot.estimated_cost:
-                shot_data['estimated_cost'] = float(db_shot.estimated_cost)
+            if db_shot:
+                shot_data['id'] = db_shot.id  # Add shot ID
+                if db_shot.estimated_cost:
+                    shot_data['estimated_cost'] = float(db_shot.estimated_cost)
         
-        # Add costs to sequences in parsed_data from database
+        # Add IDs and costs to sequences in parsed_data from database
         sequences_in_parsed = parsed_data.get('sequences', [])
         for seq_data in sequences_in_parsed:
             seq_number = seq_data.get('sequence_number')
@@ -413,8 +429,10 @@ def story_detail(request, story_id):
                     story=story,
                     sequence_number=seq_number
                 ).first()
-                if db_sequence and db_sequence.estimated_cost:
-                    seq_data['estimated_cost'] = float(db_sequence.estimated_cost)
+                if db_sequence:
+                    seq_data['id'] = db_sequence.id  # Add sequence ID
+                    if db_sequence.estimated_cost:
+                        seq_data['estimated_cost'] = float(db_sequence.estimated_cost)
         
         story_data = {
             'id': story.id,
@@ -884,6 +902,7 @@ def shot_art_control_settings(request, story_id, shot_id):
             if serializer.is_valid():
                 serializer.save()
                 return Response(serializer.data, status=status.HTTP_200_OK)
+                
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     except (Story.DoesNotExist, Shot.DoesNotExist):
