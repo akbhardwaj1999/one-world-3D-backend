@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat
+from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat, CharacterTalentAssignment, AssetTalentAssignment, ShotTalentAssignment
 from .services.story_parser import parse_story_to_structured_data
 from .services.cost_calculator import (
     calculate_asset_cost,
@@ -582,15 +582,109 @@ def story_cost_breakdown(request, story_id):
                 'shot_count': sequence.shots.count() if hasattr(sequence, 'shots') else 0
             })
         
+        # Calculate talent costs breakdown
+        talent_breakdown = {
+            'total': 0.0,
+            'by_type': {
+                'voice_actor': 0.0,
+                '3d_artist': 0.0,
+                'animator': 0.0,
+                'other': 0.0
+            },
+            'items': []
+        }
+        
+        # Character talent assignments (voice actors)
+        for character in story.characters.all():
+            for assignment in character.talent_assignments.all():
+                if assignment.rate_agreed:
+                    cost = float(assignment.rate_agreed)
+                    talent_breakdown['total'] += cost
+                    talent_breakdown['by_type']['voice_actor'] += cost
+                    talent_breakdown['items'].append({
+                        'entity_type': 'character',
+                        'entity_name': character.name,
+                        'talent_name': assignment.talent.name,
+                        'talent_type': 'voice_actor',
+                        'role_type': assignment.role_type,
+                        'cost': cost
+                    })
+        
+        # Asset talent assignments (3D artists)
+        for asset in story.story_assets.all():
+            for assignment in asset.talent_assignments.all():
+                cost = 0.0
+                if assignment.rate_agreed:
+                    if assignment.estimated_hours:
+                        # Calculate: rate * hours
+                        cost = float(assignment.rate_agreed) * float(assignment.estimated_hours)
+                    else:
+                        # Just use agreed rate as flat fee
+                        cost = float(assignment.rate_agreed)
+                    
+                    if cost > 0:
+                        talent_breakdown['total'] += cost
+                        talent_type = assignment.talent.talent_type
+                        if talent_type in ['3d_artist', 'modeler', 'texture_artist', 'rigger']:
+                            talent_breakdown['by_type']['3d_artist'] += cost
+                        else:
+                            talent_breakdown['by_type']['other'] += cost
+                        
+                        talent_breakdown['items'].append({
+                            'entity_type': 'asset',
+                            'entity_name': asset.name,
+                            'talent_name': assignment.talent.name,
+                            'talent_type': talent_type,
+                            'role_type': assignment.role_type,
+                            'estimated_hours': assignment.estimated_hours,
+                            'cost': cost
+                        })
+        
+        # Shot talent assignments (animators)
+        for shot in story.shots.all():
+            for assignment in shot.talent_assignments.all():
+                cost = 0.0
+                if assignment.rate_agreed:
+                    if assignment.estimated_hours:
+                        # Calculate: rate * hours
+                        cost = float(assignment.rate_agreed) * float(assignment.estimated_hours)
+                    else:
+                        # Just use agreed rate as flat fee
+                        cost = float(assignment.rate_agreed)
+                    
+                    if cost > 0:
+                        talent_breakdown['total'] += cost
+                        talent_type = assignment.talent.talent_type
+                        if talent_type in ['animator', 'lighting_artist', 'compositor', 'fx_artist']:
+                            talent_breakdown['by_type']['animator'] += cost
+                        else:
+                            talent_breakdown['by_type']['other'] += cost
+                        
+                        talent_breakdown['items'].append({
+                            'entity_type': 'shot',
+                            'entity_name': f'Shot {shot.shot_number}',
+                            'talent_name': assignment.talent.name,
+                            'talent_type': talent_type,
+                            'role_type': assignment.role_type,
+                            'estimated_hours': assignment.estimated_hours,
+                            'cost': cost
+                        })
+        
+        # Calculate total cost including talent
+        total_with_talent = float(story.total_estimated_cost) if story.total_estimated_cost else 0.0
+        total_with_talent += talent_breakdown['total']
+        
         response_data = {
             'story_id': story.id,
             'story_title': story.title,
             'total_estimated_cost': float(story.total_estimated_cost) if story.total_estimated_cost else 0.0,
+            'total_with_talent_cost': total_with_talent,
             'budget_range': story.budget_range or None,
             'breakdown': {
                 'assets': assets_breakdown,
                 'shots': shots_breakdown,
-                'sequences': sequences_breakdown
+                'sequences': sequences_breakdown,
+                'talent': talent_breakdown
             }
         }
         
@@ -862,7 +956,7 @@ def shot_art_control_settings(request, story_id, shot_id):
             shot_settings, created = ArtControlSettings.objects.get_or_create(
                 shot=shot,
                 defaults={'created_by': request.user}
-            )
+            )   
             
             # Merge with inheritance: story -> sequence -> shot
             if sequence_settings:
