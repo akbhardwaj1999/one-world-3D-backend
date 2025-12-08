@@ -29,7 +29,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-rj*a&m_s8cbvod506b*q@ntmrpi*^-0ta$(t!0jp=3fki)i(=y'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Set DEBUG=False in production via environment variable
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 # ALLOWED_HOSTS for PythonAnywhere deployment
 ALLOWED_HOSTS = [
@@ -38,6 +39,11 @@ ALLOWED_HOSTS = [
     'akumar1999.pythonanywhere.com',
     '.pythonanywhere.com',  # Allows all PythonAnywhere subdomains
 ]
+
+# Add production domain to ALLOWED_HOSTS if set
+PRODUCTION_DOMAIN = os.getenv('PRODUCTION_DOMAIN', '')
+if PRODUCTION_DOMAIN:
+    ALLOWED_HOSTS.append(PRODUCTION_DOMAIN)
 
 
 
@@ -240,3 +246,45 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+
+# Email Configuration - Simple direct read from .env
+# If EMAIL_BACKEND contains 'smtp' in .env, use SMTP, otherwise use console
+email_backend_setting = os.getenv('EMAIL_BACKEND', 'console').strip().lower()
+
+if 'smtp' in email_backend_setting:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+else:
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@oneworld3d.com')
+SERVER_EMAIL = os.getenv('SERVER_EMAIL', DEFAULT_FROM_EMAIL)
+
+
+# Admin email list (comma-separated)
+ADMIN_EMAIL_LIST = os.getenv('ADMIN_EMAIL_LIST', '').split(',') if os.getenv('ADMIN_EMAIL_LIST') else []
+
+# Frontend URL for password reset links
+# Development: http://localhost:3000
+# Production: Set FRONTEND_URL in .env to your live website URL
+# Example: FRONTEND_URL=https://yourdomain.com
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+
+print("Email Configuration")
+
+print("EMAIL_BACKEND:", EMAIL_BACKEND)
+print("EMAIL_HOST:", EMAIL_HOST)
+print("EMAIL_PORT:", EMAIL_PORT)
+print("EMAIL_USE_TLS:", EMAIL_USE_TLS)
+print("EMAIL_HOST_USER:", EMAIL_HOST_USER)
+print("EMAIL_HOST_PASSWORD:", "SET" if EMAIL_HOST_PASSWORD else "NOT SET")
+print("DEFAULT_FROM_EMAIL:", DEFAULT_FROM_EMAIL)
+print("SERVER_EMAIL:", SERVER_EMAIL)
+print("ADMIN_EMAIL_LIST:", ADMIN_EMAIL_LIST)
+print("FRONTEND_URL:", FRONTEND_URL)
+print("-------------------")

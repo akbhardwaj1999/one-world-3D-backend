@@ -977,7 +977,7 @@ def shot_art_control_settings(request, story_id, shot_id):
         elif request.method == 'POST':
             if ArtControlSettings.objects.filter(shot=shot).exists():
                 return Response(
-                    {'error': 'Art control settings already exist. Use PUT to update.'},
+                    {'error': 'Art control settings already exist. Use PUT to upda,te.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
