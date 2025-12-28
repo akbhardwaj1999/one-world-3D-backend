@@ -3,7 +3,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat, CharacterTalentAssignment, AssetTalentAssignment, ShotTalentAssignment
+from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat
+from talent_pool.models import CharacterTalentAssignment, AssetTalentAssignment, ShotTalentAssignment
 from .services.story_parser import parse_story_to_structured_data
 from .services.cost_calculator import (
     calculate_asset_cost,
@@ -90,7 +91,7 @@ def parse_story(request):
         
         # Create sequences first
         sequences_dict = {}
-        sequences_with_ids = {}  # Store sequence objects with their IDs for later
+        sequences_with_ids = {}  #Store sequence objects with their IDs for later
         for seq_data in parsed_data.get('sequences', []):
             location = None
             location_name = seq_data.get('location', '')

@@ -64,7 +64,9 @@ INSTALLED_APPS = [
     
     # Local apps
     'accounts',
-    'ai_machines',  # Only for story parsing
+    'ai_machines',  # Story parsing, art control
+    'departments',  # Department management and assignments
+    'talent_pool',  # Talent pool management and assignments
 ]
 
 MIDDLEWARE = [

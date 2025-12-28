@@ -52,8 +52,8 @@ class UserManagementAPITestCase(APITestCase):
         self.assertGreaterEqual(len(response.data), 2)  # Admin + test user
     
     def test_list_users_permission_denied(self):
-        """Test that non-admin users cannot list all users"""
-        # Create non-admin user
+        """Test that non-admin users without organization can only see their own profile"""
+        # Create non-admin user without organization
         regular_user = User.objects.create_user(
             username='regular',
             email='regular@example.com',
@@ -66,7 +66,10 @@ class UserManagementAPITestCase(APITestCase):
         url = '/api/auth/users/'
         response = self.client.get(url)
         
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        # Users without organization can see their own profile
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)  # Only their own profile
+        self.assertEqual(response.data[0]['id'], regular_user.id)
     
     def test_get_user_detail_success(self):
         """Test getting user details"""

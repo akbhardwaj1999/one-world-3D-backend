@@ -1,208 +1,405 @@
-# ONE WORLD 3D - Backend
+# ONE WORLD 3D - Backend API
 
-Django REST Framework backend for ONE WORLD 3D platform.
+Django REST Framework based backend API for ONE WORLD 3D application.
 
-## 🚀 Tech Stack
+## 📋 Table of Contents
 
-- **Django 5.2.8** - Web Framework
-- **Django REST Framework 3.16.1** - API Framework
-- **Django REST Framework SimpleJWT 5.5.1** - JWT Authentication
-- **Django CORS Headers 4.9.0** - CORS Support
-- **OpenAI 2.7.2** - GPT-4 API for Story Parsing
-- **python-dotenv 1.2.1** - Environment Variables Management
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Setup Instructions](#setup-instructions)
+- [Adding Dummy Data](#adding-dummy-data)
+- [Running Tests](#running-tests)
+- [API Endpoints](#api-endpoints)
+- [Environment Variables](#environment-variables)
+
+## ✨ Features
+
+- **User Management & Permissions**: Organizations, Teams, Roles, Users, Invitations
+- **Story Parsing**: AI-powered story parsing and structured data extraction
+- **Departments**: Workspace and department management
+- **Talent Pool**: Talent management and assignments
+- **Art Control**: Story, sequence, and shot-level art control settings
+- **Chat System**: User chat conversations
+- **Cost Calculation**: Automatic cost breakdown for stories, assets, and shots
+
+## 🛠 Tech Stack
+
+- **Python 3.12+**
+- **Django 4.2+**
+- **Django REST Framework**
+- **JWT Authentication** (djangorestframework-simplejwt)
+- **SQLite** (Development) / **PostgreSQL** (Production)
+- **CORS Headers** (for frontend integration)
 
 ## 📁 Project Structure
 
 ```
 backend/
-├── accounts/              # User authentication & management
-│   ├── models.py         # Custom User model
-│   ├── serializers.py    # User serializers
+├── accounts/              # User Management & Permissions
+│   ├── models.py         # User, Organization, Team, Role, Invitation models
 │   ├── views.py          # Authentication views
-│   └── urls.py           # Auth URLs
-├── ai_machines/          # Story Parsing with GPT-4
-│   ├── models.py         # Story, Character, Location, Asset, Shot models
-│   ├── views.py          # Story parsing API
-│   ├── urls.py           # Story parsing URLs
-│   └── services/
-│       └── story_parser.py  # GPT-4 story parsing service
-├── oneworld3d_backend/   # Main project
-│   ├── settings.py       # Django settings
-│   ├── urls.py           # Main URL routing
-│   └── wsgi.py           # WSGI config
-├── manage.py
-├── requirements.txt
-├── .env                  # Environment variables (OPENAI_API_KEY)
-└── README.md
+│   ├── user_management_views.py  # User management API views
+│   ├── serializers.py    # API serializers
+│   ├── tests.py          # Test cases (40 tests)
+│   └── management/commands/
+│       ├── create_default_roles.py      # Create default roles
+│       └── create_dummy_user_data.py    # Create dummy data
+│
+├── ai_machines/          # Story Parsing & Management
+│   ├── models.py         # Story, Character, Location, Asset, Sequence, Shot, Chat
+│   ├── views.py          # Story parsing, cost breakdown, art control
+│   ├── chat_views.py     # Chat CRUD operations
+│   ├── serializers.py    # API serializers
+│   ├── tests.py          # Test cases (38 tests)
+│   └── services/         # Business logic
+│       ├── story_parser.py      # AI story parsing
+│       └── cost_calculator.py   # Cost calculations
+│
+├── departments/          # Department Management
+│   ├── models.py         # Department, assignments
+│   ├── views.py          # Department API views
+│   ├── serializers.py    # API serializers
+│   ├── tests.py          # Test cases (31 tests)
+│   └── management/commands/
+│       └── create_default_departments.py  # Create default departments
+│
+├── talent_pool/          # Talent Pool Management
+│   ├── models.py         # Talent, assignments
+│   ├── views.py          # Talent API views
+│   ├── serializers.py    # API serializers
+│   ├── tests.py          # Test cases (34 tests)
+│   └── management/commands/
+│       └── create_default_talents.py      # Create dummy talents
+│
+└── oneworld3d_backend/   # Main project settings
+    ├── settings.py       # Django settings
+    ├── urls.py           # Main URL configuration
+    └── wsgi.py           # WSGI configuration
 ```
 
-## 🛠️ Setup & Installation
+## 🚀 Setup Instructions
 
-### Prerequisites
-- Python 3.11+
-- pip
-- Virtual environment (recommended)
-- OpenAI API Key
+### 1. Prerequisites
 
-### Installation
+- Python 3.12 or higher
+- pip (Python package manager)
+
+### 2. Clone and Navigate
 
 ```bash
-# Create virtual environment
+cd backend
+```
+
+### 3. Create Virtual Environment
+
+```bash
+# Windows
 python -m venv venv
+venv\Scripts\activate
 
-# Activate virtual environment
-# Windows:
-venv\Scripts\Activate.ps1
-# Linux/Mac:
+# Linux/Mac
+python3 -m venv venv
 source venv/bin/activate
+```
 
-# Install dependencies
+### 4. Install Dependencies
+
+```bash
 pip install -r requirements.txt
+```
 
-# Set OpenAI API Key
-# Windows (PowerShell):
-$env:OPENAI_API_KEY="your-api-key-here"
-# Or create .env file in backend directory:
-# OPENAI_API_KEY=your-api-key-here
+### 5. Environment Variables
 
-# Run migrations
+Create a `.env` file in the `backend` directory:
+
+```env
+SECRET_KEY=your-secret-key-here
+DEBUG=True
+DATABASE_URL=sqlite:///db.sqlite3
+
+# Email Configuration (Optional)
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-app-password
+DEFAULT_FROM_EMAIL=your-email@gmail.com
+
+# Frontend URL (for CORS)
+FRONTEND_URL=http://localhost:3000
+```
+
+### 6. Run Migrations
+
+```bash
 python manage.py makemigrations
 python manage.py migrate
+```
 
-# Create superuser (optional)
+### 7. Create Superuser (Optional)
+
+```bash
 python manage.py createsuperuser
+```
 
-# Run development server
+### 8. Run Development Server
+
+```bash
 python manage.py runserver
 ```
 
-The server will run at `http://localhost:8000`
+Server will run at: `http://localhost:8000`
 
-## 📡 API Endpoints
+## 📊 Adding Dummy Data
+
+### 1. Create Default Roles
+
+```bash
+python manage.py create_default_roles
+```
+
+This creates 6 system roles:
+- Super Admin
+- Admin
+- Project Manager
+- Artist/Contractor
+- Reviewer
+- Viewer
+
+### 2. Create Dummy User Data
+
+```bash
+python manage.py create_dummy_user_data --count 20
+```
+
+This creates:
+- 20 Organizations
+- 20 Teams
+- 20 Custom Roles
+- 20 Users
+- 20 Invitations
+
+**Default Credentials:**
+- Admin: `admin@oneworld3d.com` / `admin123`
+- Users: `john.smith@example.com` / `test123` (and others)
+
+### 3. Create Default Departments
+
+```bash
+python manage.py create_default_departments
+```
+
+This creates 23 default departments (Modeling, Texturing, Animation, etc.)
+
+### 4. Create Default Talents
+
+```bash
+python manage.py create_default_talents
+```
+
+This creates 19 sample talents with various types and specializations.
+
+## 🧪 Running Tests
+
+### Run All Tests
+
+```bash
+python manage.py test
+```
+
+### Run Specific App Tests
+
+```bash
+# User Management tests (40 tests)
+python manage.py test accounts.tests
+
+# Story & AI Machines tests (38 tests)
+python manage.py test ai_machines.tests
+
+# Department tests (31 tests)
+python manage.py test departments.tests
+
+# Talent Pool tests (34 tests)
+python manage.py test talent_pool.tests
+```
+
+### Run with Verbose Output
+
+```bash
+python manage.py test --verbosity=2
+```
+
+**Total Test Coverage: 143 test cases** ✅
+
+## 🔌 API Endpoints
 
 ### Authentication
-- `POST /api/auth/register/` - User registration
-- `POST /api/auth/login/` - User login
-- `GET /api/auth/profile/` - Get user profile
-- `PUT /api/auth/profile/update/` - Update user profile
+- `POST /api/auth/register/` - Register new user
+- `POST /api/auth/login/` - Login (get JWT token)
+- `POST /api/auth/logout/` - Logout
+- `POST /api/auth/forgot-password/` - Request password reset
+- `POST /api/auth/reset-password/` - Reset password
 
-### Story Parsing
-- `POST /api/ai-machines/parse-story/` - Parse story/script using GPT-4
-  - **Body:**
-    ```json
-    {
-      "story_text": "Your story content here..."
-    }
-    ```
-  - **Response:**
-    ```json
-    {
-      "story_id": 1,
-      "parsed_data": {
-        "summary": "Story summary",
-        "total_shots": 6,
-        "estimated_total_time": "10-15 days",
-        "characters": [...],
-        "locations": [...],
-        "assets": [...],
-        "shots": [...]
-      },
-      "message": "Story parsed successfully"
-    }
-    ```
+### User Management
+- `GET /api/auth/users/` - List users
+- `GET /api/auth/users/{id}/` - Get user details
+- `PUT /api/auth/users/{id}/update/` - Update user
+- `DELETE /api/auth/users/{id}/delete/` - Delete user
+
+### Organizations
+- `GET /api/auth/organizations/` - List organizations
+- `POST /api/auth/organizations/` - Create organization
+- `GET /api/auth/organizations/{id}/` - Get organization
+- `PUT /api/auth/organizations/{id}/` - Update organization
+- `DELETE /api/auth/organizations/{id}/` - Delete organization
+
+### Teams
+- `GET /api/auth/teams/` - List teams
+- `POST /api/auth/teams/` - Create team
+- `GET /api/auth/teams/{id}/` - Get team
+- `GET /api/auth/teams/{id}/members/` - Get team members
+- `POST /api/auth/teams/{id}/members/` - Add team member
+- `DELETE /api/auth/teams/{id}/members/{user_id}/` - Remove member
+
+### Roles
+- `GET /api/auth/roles/` - List roles
+- `POST /api/auth/roles/` - Create role
+- `GET /api/auth/roles/{id}/` - Get role
+- `PUT /api/auth/roles/{id}/` - Update role
+- `DELETE /api/auth/roles/{id}/` - Delete role
+
+### Invitations
+- `GET /api/auth/invitations/` - List invitations
+- `POST /api/auth/invitations/` - Create invitation
+- `GET /api/auth/invitations/{token}/` - Get invitation by token
+- `POST /api/auth/invitations/{id}/accept/` - Accept invitation
+- `POST /api/auth/invitations/{id}/cancel/` - Cancel invitation
+
+### Stories
+- `POST /api/ai-machines/parse-story/` - Parse story text
+- `GET /api/ai-machines/stories/` - List stories
+- `GET /api/ai-machines/stories/{id}/` - Get story details
+- `GET /api/ai-machines/stories/{id}/cost-breakdown/` - Get cost breakdown
+
+### Art Control
+- `GET /api/ai-machines/stories/{id}/art-control/` - Get art control settings
+- `POST /api/ai-machines/stories/{id}/art-control/` - Create art control
+- `PUT /api/ai-machines/stories/{id}/art-control/` - Update art control
+- `DELETE /api/ai-machines/stories/{id}/art-control/reset/` - Reset art control
+
+### Chats
+- `GET /api/ai-machines/chats/` - List chats
+- `POST /api/ai-machines/chats/create/` - Create chat
+- `GET /api/ai-machines/chats/{id}/` - Get chat
+- `PUT /api/ai-machines/chats/{id}/update/` - Update chat
+- `DELETE /api/ai-machines/chats/{id}/delete/` - Delete chat
+
+### Departments
+- `GET /api/departments/` - List departments
+- `POST /api/departments/` - Create department
+- `GET /api/departments/{id}/` - Get department
+- `PUT /api/departments/{id}/` - Update department
+- `DELETE /api/departments/{id}/` - Delete department
+
+### Talent Pool
+- `GET /api/talent-pool/talent/` - List talents
+- `POST /api/talent-pool/talent/` - Create talent
+- `GET /api/talent-pool/talent/{id}/` - Get talent
+- `PUT /api/talent-pool/talent/{id}/` - Update talent
+- `DELETE /api/talent-pool/talent/{id}/` - Delete talent
 
 ## 🔐 Authentication
 
-The API uses JWT (JSON Web Tokens) for authentication. Include the token in the Authorization header:
+All API endpoints (except register/login) require JWT authentication.
 
+**Request Header:**
 ```
-Authorization: Bearer <your_token>
-```
-
-## ⚙️ Configuration
-
-### Settings
-
-Key configurations in `settings.py`:
-
-- **CORS**: Allowed origins for React frontend (`http://localhost:3000`)
-- **JWT**: Token lifetime and refresh settings
-- **REST Framework**: Default authentication and permissions
-- **Database**: SQLite (default, can be changed to PostgreSQL)
-
-### Environment Variables
-
-**Required:**
-- `OPENAI_API_KEY` - OpenAI API key for GPT-4 story parsing
-
-**Setting OpenAI API Key:**
-
-**Windows (PowerShell):**
-```powershell
-$env:OPENAI_API_KEY="your-api-key-here"
+Authorization: Bearer <your-jwt-token>
 ```
 
-**Windows (Command Prompt):**
-```cmd
-set OPENAI_API_KEY=your-api-key-here
-```
-
-**Linux/Mac:**
+**Get Token:**
 ```bash
-export OPENAI_API_KEY="your-api-key-here"
-```
+POST /api/auth/login/
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
 
-**Or create a `.env` file in the backend directory:**
-```
-OPENAI_API_KEY=your-api-key-here
-```
-
-Get your API key from: https://platform.openai.com/api-keys
-
-## 🗄️ Database
-
-Default database is SQLite (`db.sqlite3`). For production, use PostgreSQL:
-
-```python
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'oneworld3d',
-        'USER': 'your_user',
-        'PASSWORD': 'your_password',
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
+Response:
+{
+  "access": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc..."
 }
 ```
 
-## 📝 Features
+## 📝 Environment Variables
 
-### Current Features
-1. ✅ User Registration & Login (JWT Authentication)
-2. ✅ Story Parsing with GPT-4
-   - Extracts Characters
-   - Extracts Locations
-   - Extracts Assets
-   - Extracts Shots with complexity
-   - Provides summary and time estimates
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SECRET_KEY` | Django secret key | Yes |
+| `DEBUG` | Debug mode (True/False) | Yes |
+| `DATABASE_URL` | Database connection string | Yes |
+| `EMAIL_HOST` | SMTP server | Optional |
+| `EMAIL_PORT` | SMTP port | Optional |
+| `EMAIL_HOST_USER` | Email username | Optional |
+| `EMAIL_HOST_PASSWORD` | Email password | Optional |
+| `FRONTEND_URL` | Frontend URL for CORS | Yes |
 
-### Database Models
-- **User** - Custom user model (email-based authentication)
-- **Story** - Parsed stories
-- **Character** - Characters extracted from stories
-- **Location** - Locations extracted from stories
-- **StoryAsset** - Assets extracted from stories
-- **Shot** - Shots extracted from stories
+## 🐛 Troubleshooting
 
-## 🤝 Development
+### Migration Issues
 
-For development, make sure your React frontend is running on `http://localhost:3000` for CORS to work properly.
+```bash
+# Delete migrations and recreate
+python manage.py makemigrations
+python manage.py migrate
+```
 
-## 📦 Dependencies
+### Database Reset
 
-See `requirements.txt` for full list of dependencies.
+```bash
+# Delete database file
+rm db.sqlite3
+
+# Recreate migrations
+python manage.py makemigrations
+python manage.py migrate
+
+# Add dummy data again
+python manage.py create_default_roles
+python manage.py create_dummy_user_data --count 20
+python manage.py create_default_departments
+python manage.py create_default_talents
+```
+
+### Port Already in Use
+
+```bash
+# Use different port
+python manage.py runserver 8001
+```
+
+## 📚 Additional Resources
+
+- [Django Documentation](https://docs.djangoproject.com/)
+- [Django REST Framework](https://www.django-rest-framework.org/)
+- [JWT Authentication](https://django-rest-framework-simplejwt.readthedocs.io/)
+
+## 🤝 Contributing
+
+1. Create a feature branch
+2. Make your changes
+3. Write/update tests
+4. Ensure all tests pass
+5. Submit a pull request
+
+## 📄 License
+
+This project is proprietary software.
 
 ---
 
-**Status:** ✅ Minimal Setup - Register/Login + Story Parsing
+**Happy Coding! 🚀**
+

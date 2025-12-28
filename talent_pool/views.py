@@ -8,9 +8,9 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.conf import settings
+from ai_machines.models import Story, Character, StoryAsset, Shot
 from .models import (
-    Talent, CharacterTalentAssignment, AssetTalentAssignment, ShotTalentAssignment,
-    Story, Character, StoryAsset, Shot
+    Talent, CharacterTalentAssignment, AssetTalentAssignment, ShotTalentAssignment
 )
 from .serializers import (
     TalentSerializer, CharacterTalentAssignmentSerializer,
@@ -25,8 +25,8 @@ from .serializers import (
 def talent_list_create(request):
     """
     List all talent or create new talent
-    GET /api/ai-machines/talent/
-    POST /api/ai-machines/talent/
+    GET /api/talent-pool/talent/
+    POST /api/talent-pool/talent/
     """
     if request.method == 'GET':
         try:
@@ -86,9 +86,9 @@ def talent_list_create(request):
 def talent_detail(request, talent_id):
     """
     Get, update, or delete a talent
-    GET /api/ai-machines/talent/{id}/
-    PUT /api/ai-machines/talent/{id}/
-    DELETE /api/ai-machines/talent/{id}/
+    GET /api/talent-pool/talent/{id}/
+    PUT /api/talent-pool/talent/{id}/
+    DELETE /api/talent-pool/talent/{id}/
     """
     try:
         talent = get_object_or_404(Talent, id=talent_id)
@@ -129,8 +129,8 @@ def talent_detail(request, talent_id):
 def character_talent_assignments(request, story_id, character_id):
     """
     Get or create character talent assignments
-    GET /api/ai-machines/stories/{story_id}/characters/{character_id}/talent/
-    POST /api/ai-machines/stories/{story_id}/characters/{character_id}/talent/
+    GET /api/talent-pool/stories/{story_id}/characters/{character_id}/talent/
+    POST /api/talent-pool/stories/{story_id}/characters/{character_id}/talent/
     """
     try:
         story = get_object_or_404(Story, id=story_id, user=request.user)
@@ -169,8 +169,8 @@ def character_talent_assignments(request, story_id, character_id):
 def character_talent_assignment_detail(request, assignment_id):
     """
     Update or delete character talent assignment
-    PUT /api/ai-machines/talent-assignments/character/{id}/
-    DELETE /api/ai-machines/talent-assignments/character/{id}/
+    PUT /api/talent-pool/talent-assignments/character/{id}/
+    DELETE /api/talent-pool/talent-assignments/character/{id}/
     """
     try:
         assignment = get_object_or_404(CharacterTalentAssignment, id=assignment_id)
@@ -213,8 +213,8 @@ def character_talent_assignment_detail(request, assignment_id):
 def asset_talent_assignments(request, story_id, asset_id):
     """
     Get or create asset talent assignments
-    GET /api/ai-machines/stories/{story_id}/assets/{asset_id}/talent/
-    POST /api/ai-machines/stories/{story_id}/assets/{asset_id}/talent/
+    GET /api/talent-pool/stories/{story_id}/assets/{asset_id}/talent/
+    POST /api/talent-pool/stories/{story_id}/assets/{asset_id}/talent/
     """
     try:
         story = get_object_or_404(Story, id=story_id, user=request.user)
@@ -253,8 +253,8 @@ def asset_talent_assignments(request, story_id, asset_id):
 def asset_talent_assignment_detail(request, assignment_id):
     """
     Update or delete asset talent assignment
-    PUT /api/ai-machines/talent-assignments/asset/{id}/
-    DELETE /api/ai-machines/talent-assignments/asset/{id}/
+    PUT /api/talent-pool/talent-assignments/asset/{id}/
+    DELETE /api/talent-pool/talent-assignments/asset/{id}/
     """
     try:
         assignment = get_object_or_404(AssetTalentAssignment, id=assignment_id)
@@ -297,8 +297,8 @@ def asset_talent_assignment_detail(request, assignment_id):
 def shot_talent_assignments(request, story_id, shot_id):
     """
     Get or create shot talent assignments
-    GET /api/ai-machines/stories/{story_id}/shots/{shot_id}/talent/
-    POST /api/ai-machines/stories/{story_id}/shots/{shot_id}/talent/
+    GET /api/talent-pool/stories/{story_id}/shots/{shot_id}/talent/
+    POST /api/talent-pool/stories/{story_id}/shots/{shot_id}/talent/
     """
     try:
         story = get_object_or_404(Story, id=story_id, user=request.user)
@@ -337,8 +337,8 @@ def shot_talent_assignments(request, story_id, shot_id):
 def shot_talent_assignment_detail(request, assignment_id):
     """
     Update or delete shot talent assignment
-    PUT /api/ai-machines/talent-assignments/shot/{id}/
-    DELETE /api/ai-machines/talent-assignments/shot/{id}/
+    PUT /api/talent-pool/talent-assignments/shot/{id}/
+    DELETE /api/talent-pool/talent-assignments/shot/{id}/
     """
     try:
         assignment = get_object_or_404(ShotTalentAssignment, id=assignment_id)
@@ -372,7 +372,3 @@ def shot_talent_assignment_detail(request, assignment_id):
             {'error': f'Error processing assignment: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
-
-
-

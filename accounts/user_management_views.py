@@ -282,8 +282,14 @@ def role_detail(request, pk):
             return Response(serializer.data)
         
         elif request.method in ['PUT', 'PATCH']:
-            # Allow any authenticated user to update roles (for testing purposes)
-            # In production, you might want to restrict system roles or add permission checks
+            # Prevent modification of system roles
+            if role.is_system_role:
+                return Response({'error': 'Cannot modify system roles'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check permissions for updating roles
+            if not request.user.is_staff and not request.user.has_permission('admin.roles'):
+                return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+            
             serializer = RoleSerializer(role, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()

@@ -34,7 +34,9 @@ urlpatterns = [
     
     # API Routes
     path('api/auth/', include('accounts.urls')),
-    path('api/ai-machines/', include('ai_machines.urls')),  # Only for story parsing
+    path('api/ai-machines/', include('ai_machines.urls')),  # Story parsing, art control
+    path('api/departments/', include('departments.urls')),  # Department management
+    path('api/talent-pool/', include('talent_pool.urls')),  # Talent pool management
 ]
 
 # Serve media files in development
