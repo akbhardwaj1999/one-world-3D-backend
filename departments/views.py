@@ -103,7 +103,7 @@ def story_departments(request, story_id):
             assigned_by=request.user,
             notes=request.data.get('notes', '')
         )
-        serializer = StoryDepartmentSerializer(story_dept)
+        serializer = StoryDepartmentSerializer(story_dept) 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -282,6 +282,24 @@ def department_stats(request, story_id, department_id):
         department=department
     )
     
+    # Calculate costs
+    from decimal import Decimal
+    total_cost = Decimal('0.00')
+    asset_cost = Decimal('0.00')
+    shot_cost = Decimal('0.00')
+    
+    # Calculate asset costs
+    for assignment in asset_assignments.select_related('asset'):
+        if assignment.asset.estimated_cost:
+            asset_cost += Decimal(str(assignment.asset.estimated_cost))
+    
+    # Calculate shot costs
+    for assignment in shot_assignments.select_related('shot'):
+        if assignment.shot.estimated_cost:
+            shot_cost += Decimal(str(assignment.shot.estimated_cost))
+    
+    total_cost = asset_cost + shot_cost
+    
     # Calculate statistics
     stats = {
         'department': {
@@ -319,7 +337,14 @@ def department_stats(request, story_id, department_id):
             'shots': shot_assignments.filter(
                 due_date__lt=timezone.now(),
                 status__in=['pending', 'in_progress']
+
+
             ).count(),
+        },
+        'costs': {
+            'total': float(total_cost),
+            'assets': float(asset_cost),
+            'shots': float(shot_cost),
         }
     }
     

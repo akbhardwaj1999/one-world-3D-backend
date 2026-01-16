@@ -9,7 +9,7 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from decimal import Decimal
 
-from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat
+from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat, AssetImage, CharacterImage
 
 User = get_user_model()
 

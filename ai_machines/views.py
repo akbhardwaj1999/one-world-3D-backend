@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.conf import settings
 from django.shortcuts import get_object_or_404
-from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat
+from .models import Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat, AssetImage, CharacterImage, LocationImage
 from talent_pool.models import CharacterTalentAssignment, AssetTalentAssignment, ShotTalentAssignment
 from .services.story_parser import parse_story_to_structured_data
 from .services.cost_calculator import (
@@ -14,6 +14,87 @@ from .services.cost_calculator import (
     get_budget_range
 )
 from .serializers import ArtControlSettingsSerializer, ChatSerializer
+
+
+# ==================== Helper Functions ====================
+
+def sync_story_parsed_data(story):
+    """
+    Sync story.parsed_data with current database state
+    Updates characters, assets, locations, sequences in parsed_data
+    """
+    if not story.parsed_data:
+        return
+    
+    parsed_data = story.parsed_data.copy()
+    
+    # Update characters in parsed_data
+    if 'characters' in parsed_data:
+        for char_data in parsed_data['characters']:
+            char_id = char_data.get('id')
+            if char_id:
+                try:
+                    db_char = Character.objects.get(id=char_id, story=story)
+                    char_data['name'] = db_char.name
+                    char_data['description'] = db_char.description
+                    char_data['role'] = db_char.role
+                    char_data['appearances'] = db_char.appearances
+                except Character.DoesNotExist:
+                    pass
+    
+    # Update assets in parsed_data
+    if 'assets' in parsed_data:
+        for asset_data in parsed_data['assets']:
+            asset_id = asset_data.get('id')
+            if asset_id:
+                try:
+                    db_asset = StoryAsset.objects.get(id=asset_id, story=story)
+                    asset_data['name'] = db_asset.name
+                    asset_data['description'] = db_asset.description
+                    asset_data['complexity'] = db_asset.complexity
+                    if db_asset.estimated_cost:
+                        asset_data['estimated_cost'] = float(db_asset.estimated_cost)
+                except StoryAsset.DoesNotExist:
+                    pass
+    
+    # Update locations in parsed_data
+    if 'locations' in parsed_data:
+        for loc_data in parsed_data['locations']:
+            loc_id = loc_data.get('id')
+            if loc_id:
+                try:
+                    db_location = Location.objects.get(id=loc_id, story=story)
+                    loc_data['name'] = db_location.name
+                    loc_data['description'] = db_location.description
+                    loc_data['type'] = db_location.location_type
+                    loc_data['scenes'] = db_location.scenes
+                except Location.DoesNotExist:
+                    pass
+    
+    # Update sequences in parsed_data
+    if 'sequences' in parsed_data:
+        for seq_data in parsed_data['sequences']:
+            seq_id = seq_data.get('id')
+            if seq_id:
+                try:
+                    db_sequence = Sequence.objects.get(id=seq_id, story=story)
+                    seq_data['title'] = db_sequence.title
+                    seq_data['description'] = db_sequence.description
+                    if db_sequence.location:
+                        seq_data['location'] = db_sequence.location.name
+                    if db_sequence.estimated_time:
+                        seq_data['estimated_time'] = db_sequence.estimated_time
+                    if db_sequence.estimated_cost:
+                        seq_data['estimated_cost'] = float(db_sequence.estimated_cost)
+                    # Update characters in sequence
+                    if 'characters' in seq_data:
+                        seq_data['characters'] = [char.name for char in db_sequence.characters.all()]
+                except Sequence.DoesNotExist:
+                    pass
+    
+    # Save updated parsed_data
+    story.parsed_data = parsed_data
+    story.save(update_fields=['parsed_data'])
 
 
 @api_view(['POST'])
@@ -58,25 +139,32 @@ def parse_story(request):
         )
         
         # Create related objects
+        characters_dict = {}  # Store characters by name for ID lookup
         for char_data in parsed_data.get('characters', []):
-            Character.objects.create(
+            character = Character.objects.create(
                 story=story,
                 name=char_data.get('name', '')[:255],
                 description=char_data.get('description', ''),
                 role=char_data.get('role', 'supporting')[:100],
                 appearances=char_data.get('appearances', 0)
             )
+            # Store character for ID lookup
+            characters_dict[character.name] = character
         
+        locations_dict = {}  # Store locations by name for ID lookup
         for loc_data in parsed_data.get('locations', []):
-            Location.objects.create(
+            location = Location.objects.create(
                 story=story,
                 name=loc_data.get('name', '')[:255],
                 description=loc_data.get('description', ''),
                 location_type=loc_data.get('type', 'outdoor')[:100],
                 scenes=loc_data.get('scenes', 0)
             )
+            # Store location for ID lookup
+            locations_dict[location.name] = location
         
         # Create assets and calculate costs
+        assets_dict = {}  # Store assets by name+type for ID lookup
         for asset_data in parsed_data.get('assets', []):
             asset = StoryAsset.objects.create(
                 story=story,
@@ -88,6 +176,9 @@ def parse_story(request):
             # Calculate and save asset cost
             asset.estimated_cost = calculate_asset_cost(asset)
             asset.save()
+            # Store asset for ID lookup
+            asset_key = f"{asset.name}_{asset.asset_type}"
+            assets_dict[asset_key] = asset
         
         # Create sequences first
         sequences_dict = {}
@@ -162,6 +253,31 @@ def parse_story(request):
         import copy
         enhanced_parsed_data = copy.deepcopy(parsed_data)
         
+        # Add IDs to characters - use the IDs we stored when creating them
+        for char_data in enhanced_parsed_data.get('characters', []):
+            char_name = char_data.get('name', '')
+            if char_name in characters_dict:
+                char_data['id'] = characters_dict[char_name].id
+                print(f"DEBUG: Added ID {characters_dict[char_name].id} to character {char_name}")
+        
+        # Add IDs to locations - use the IDs we stored when creating them
+        for loc_data in enhanced_parsed_data.get('locations', []):
+            loc_name = loc_data.get('name', '')
+            if loc_name in locations_dict:
+                loc_data['id'] = locations_dict[loc_name].id
+                print(f"DEBUG: Added ID {locations_dict[loc_name].id} to location {loc_name}")
+        
+        # Add IDs to assets - use the IDs we stored when creating them
+        for asset_data in enhanced_parsed_data.get('assets', []):
+            asset_name = asset_data.get('name', '')
+            asset_type = asset_data.get('type', 'prop')
+            asset_key = f"{asset_name}_{asset_type}"
+            if asset_key in assets_dict:
+                asset_data['id'] = assets_dict[asset_key].id
+                if assets_dict[asset_key].estimated_cost:
+                    asset_data['estimated_cost'] = float(assets_dict[asset_key].estimated_cost)
+                print(f"DEBUG: Added ID {assets_dict[asset_key].id} to asset {asset_key}")
+        
         # Add IDs to sequences - use the IDs we stored when creating them
         for seq in enhanced_parsed_data.get('sequences', []):
             seq_num = seq.get('sequence_number', 1)
@@ -232,11 +348,42 @@ def parse_story(request):
         enhanced_parsed_data['total_estimated_cost'] = float(story.total_estimated_cost) if story.total_estimated_cost else None
         enhanced_parsed_data['budget_range'] = story.budget_range
         
-        # Add costs to assets in parsed data
+        # Add IDs and costs to assets in parsed data
         for asset in enhanced_parsed_data.get('assets', []):
-            asset_obj = StoryAsset.objects.filter(story=story, name=asset.get('name', '')).first()
-            if asset_obj and asset_obj.estimated_cost:
-                asset['estimated_cost'] = float(asset_obj.estimated_cost)
+            asset_name = asset.get('name', '')
+            asset_type = asset.get('type', 'prop')
+            asset_key = f"{asset_name}_{asset_type}"
+            
+            # Find the created asset
+            asset_obj = assets_dict.get(asset_key)
+            if not asset_obj:
+                # Fallback: try to find in database
+                asset_obj = StoryAsset.objects.filter(
+                    story=story,
+                    name=asset_name,
+                    asset_type=asset_type
+                ).first()
+            
+            if asset_obj:
+                asset['id'] = asset_obj.id  # Add asset ID
+                if asset_obj.estimated_cost:
+                    asset['estimated_cost'] = float(asset_obj.estimated_cost)
+        
+        # Add IDs to locations in parsed data
+        for location in enhanced_parsed_data.get('locations', []):
+            location_name = location.get('name', '')
+            
+            # Find the created location
+            location_obj = locations_dict.get(location_name)
+            if not location_obj:
+                # Fallback: try to find in database
+                location_obj = Location.objects.filter(
+                    story=story,
+                    name=location_name
+                ).first()
+            
+            if location_obj:
+                location['id'] = location_obj.id  # Add location ID
         
         # Add costs to shots in parsed data 
         for shot in enhanced_parsed_data.get('shots', []):
@@ -365,15 +512,80 @@ def story_detail(request, story_id):
         
         # Add IDs and costs to characters in parsed_data from database
         characters_in_parsed = parsed_data.get('characters', [])
-        for char_data in characters_in_parsed:
-            char_name = char_data.get('name', '')
-            # Find matching character in database
-            db_character = Character.objects.filter(
-                story=story,
-                name=char_name
-            ).first()
+        
+        # Get all characters for this story to match by ID or name
+        all_db_characters = {c.id: c for c in Character.objects.filter(story=story)}
+        all_db_characters_list = list(all_db_characters.values())
+        all_db_characters_by_name = {c.name: c for c in all_db_characters.values()}
+        
+        # Track which database characters have been assigned
+        assigned_db_chars = set()
+        
+        for idx, char_data in enumerate(characters_in_parsed):
+            # First check if ID already exists and verify it's still valid
+            existing_id = char_data.get('id')
+            if existing_id and existing_id in all_db_characters:
+                # ID exists and is valid, update the data from database
+                db_char = all_db_characters[existing_id]
+                char_data['name'] = db_char.name
+                char_data['description'] = db_char.description
+                char_data['role'] = db_char.role
+                char_data['appearances'] = db_char.appearances
+                continue
+            
+            # If no valid ID, try to find by name
+            char_name = char_data.get('name', '').strip()
+            if not char_name:
+                continue
+            
+            # Try exact match first
+            db_character = all_db_characters_by_name.get(char_name)
+            
+            # If not found, try case-insensitive match
+            if not db_character:
+                for db_char in all_db_characters.values():
+                    if db_char.name.lower() == char_name.lower():
+                        db_character = db_char
+                        break
+            
+            # If still not found, try partial match (in case name was updated)
+            if not db_character:
+                for db_char in all_db_characters.values():
+                    # Check if either name contains the other
+                    if (char_name.lower() in db_char.name.lower() or 
+                        db_char.name.lower() in char_name.lower()):
+                        db_character = db_char
+                        break
+            
+            # Last resort: If only one character exists, use it
+            if not db_character and len(all_db_characters) == 1:
+                db_character = list(all_db_characters.values())[0]
+            
+            # If still not found and we have characters, use index-based matching
+            # This handles cases where names don't match at all
+            if not db_character and len(all_db_characters_list) > 0:
+                # Try to match by index if same number of characters
+                if len(characters_in_parsed) == len(all_db_characters_list):
+                    # Use character at same index, but skip if already assigned
+                    for db_char in all_db_characters_list:
+                        if db_char.id not in assigned_db_chars:
+                            db_character = db_char
+                            break
+                else:
+                    # Use first available unassigned character
+                    for db_char in all_db_characters_list:
+                        if db_char.id not in assigned_db_chars:
+                            db_character = db_char
+                            break
+            
             if db_character:
                 char_data['id'] = db_character.id  # Add character ID
+                assigned_db_chars.add(db_character.id)  # Mark as assigned
+                # Also update other fields from database
+                char_data['name'] = db_character.name
+                char_data['description'] = db_character.description
+                char_data['role'] = db_character.role
+                char_data['appearances'] = db_character.appearances
         
         # Add IDs and costs to assets in parsed_data from database
         assets_in_parsed = parsed_data.get('assets', [])
@@ -390,6 +602,33 @@ def story_detail(request, story_id):
                 asset_data['id'] = db_asset.id  # Add asset ID
                 if db_asset.estimated_cost:
                     asset_data['estimated_cost'] = float(db_asset.estimated_cost)
+        
+        # Add IDs to locations in parsed_data from database
+        locations_in_parsed = parsed_data.get('locations', [])
+        for loc_data in locations_in_parsed:
+            # First check if ID already exists
+            if loc_data.get('id'):
+                continue
+            
+            loc_name = loc_data.get('name', '').strip()
+            if not loc_name:
+                continue
+            
+            # Find matching location in database (try exact match first, then case-insensitive)
+            db_location = Location.objects.filter(
+                story=story,
+                name=loc_name
+            ).first()
+            
+            # If not found, try case-insensitive match
+            if not db_location:
+                db_location = Location.objects.filter(
+                    story=story,
+                    name__iexact=loc_name
+                ).first()
+            
+            if db_location:
+                loc_data['id'] = db_location.id  # Add location ID
         
         # Add IDs and costs to shots in parsed_data from database
         shots_in_parsed = parsed_data.get('shots', [])
@@ -434,6 +673,10 @@ def story_detail(request, story_id):
                     seq_data['id'] = db_sequence.id  # Add sequence ID
                     if db_sequence.estimated_cost:
                         seq_data['estimated_cost'] = float(db_sequence.estimated_cost)
+        
+        # Save updated parsed_data back to database (with IDs added)
+        story.parsed_data = parsed_data
+        story.save(update_fields=['parsed_data'])
         
         story_data = {
             'id': story.id,
@@ -1010,5 +1253,946 @@ def shot_art_control_settings(request, story_id, shot_id):
         error_trace = traceback.format_exc()
         return Response(
             {'error': f'Error processing art control settings: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ==================== Asset Detail & Management APIs ====================
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def asset_detail(request, story_id, asset_id):
+    """
+    Get asset details
+    GET /api/ai-machines/stories/{story_id}/assets/{asset_id}/
+    
+    Returns:
+    {
+        "id": 1,
+        "name": "Hero Character",
+        "asset_type": "model",
+        "description": "Main character model",
+        "complexity": "high",
+        "estimated_cost": 2000.00,
+        "cost_per_hour": 100.00,
+        "story_id": 1,
+        "story_title": "My Story",
+        "images": [
+            {
+                "id": 1,
+                "image_url": "/media/assets/images/...",
+                "image_type": "uploaded",
+                "description": "",
+                "created_at": "2024-01-01T00:00:00Z"
+            }
+        ]
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        asset = get_object_or_404(StoryAsset, id=asset_id, story=story)
+        
+        # Get asset images
+        images = AssetImage.objects.filter(asset=asset)
+        images_data = []
+        for img in images:
+            images_data.append({
+                'id': img.id,
+                'image_url': request.build_absolute_uri(img.image.url) if img.image else None,
+                'image_type': img.image_type,
+                'description': img.description,
+                'created_at': img.created_at.isoformat(),
+            })
+        
+        asset_data = {
+            'id': asset.id,
+            'name': asset.name,
+            'asset_type': asset.asset_type,
+            'description': asset.description,
+            'complexity': asset.complexity,
+            'estimated_cost': float(asset.estimated_cost) if asset.estimated_cost else None,
+            'cost_per_hour': float(asset.cost_per_hour) if asset.cost_per_hour else None,
+            'story_id': story.id,
+            'story_title': story.title,
+            'images': images_data,
+        }
+        
+        return Response(asset_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except StoryAsset.DoesNotExist:
+        return Response(
+            {'error': 'Asset not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error fetching asset: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def asset_update(request, story_id, asset_id):
+    """
+    Update asset details (name, description, etc.)
+    PATCH /api/ai-machines/stories/{story_id}/assets/{asset_id}/
+    
+    Body:
+    {
+        "name": "Updated Asset Name",
+        "description": "Updated description",
+        "complexity": "high"
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        asset = get_object_or_404(StoryAsset, id=asset_id, story=story)
+        
+        # Update fields if provided
+        if 'name' in request.data:
+            asset.name = request.data['name'][:255]
+        if 'description' in request.data:
+            asset.description = request.data['description']
+        if 'complexity' in request.data:
+            asset.complexity = request.data['complexity'][:20]
+        
+        asset.save()
+        
+        # Recalculate cost if complexity changed
+        if 'complexity' in request.data:
+            from .services.cost_calculator import calculate_asset_cost
+            asset.estimated_cost = calculate_asset_cost(asset)
+            asset.save()
+        
+        # Sync story.parsed_data with updated asset data
+        sync_story_parsed_data(story)
+        
+        asset_data = {
+            'id': asset.id,
+            'name': asset.name,
+            'asset_type': asset.asset_type,
+            'description': asset.description,
+            'complexity': asset.complexity,
+            'estimated_cost': float(asset.estimated_cost) if asset.estimated_cost else None,
+            'cost_per_hour': float(asset.cost_per_hour) if asset.cost_per_hour else None,
+        }
+        
+        return Response(asset_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except StoryAsset.DoesNotExist:
+        return Response(
+            {'error': 'Asset not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error updating asset: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def asset_upload_images(request, story_id, asset_id):
+    """
+    Upload images for an asset
+    POST /api/ai-machines/stories/{story_id}/assets/{asset_id}/upload-images/
+    
+    Body (multipart/form-data):
+    - images[]: file1, file2, ...
+    - description: "Optional description"
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        asset = get_object_or_404(StoryAsset, id=asset_id, story=story)
+        
+        uploaded_files = request.FILES.getlist('images')
+        description = request.data.get('description', '')
+        
+        if not uploaded_files:
+            return Response(
+                {'error': 'No images provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        created_images = []
+        for image_file in uploaded_files:
+            # Validate file type
+            if not image_file.content_type.startswith('image/'):
+                continue
+            
+            asset_image = AssetImage.objects.create(
+                asset=asset,
+                image=image_file,
+                image_type='uploaded',
+                description=description,
+                uploaded_by=request.user
+            )
+            
+            created_images.append({
+                'id': asset_image.id,
+                'image_url': request.build_absolute_uri(asset_image.image.url),
+                'image_type': asset_image.image_type,
+                'description': asset_image.description,
+                'created_at': asset_image.created_at.isoformat(),
+            })
+        
+        if not created_images:
+            return Response(
+                {'error': 'No valid images uploaded'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return Response({
+            'message': f'Successfully uploaded {len(created_images)} image(s)',
+            'images': created_images
+        }, status=status.HTTP_201_CREATED)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except StoryAsset.DoesNotExist:
+        return Response(
+            {'error': 'Asset not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error uploading images: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def asset_delete_image(request, story_id, asset_id, image_id):
+    """
+    Delete an asset image
+    DELETE /api/ai-machines/stories/{story_id}/assets/{asset_id}/images/{image_id}/
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        asset = get_object_or_404(StoryAsset, id=asset_id, story=story)
+        image = get_object_or_404(AssetImage, id=image_id, asset=asset)
+        
+        image.delete()
+        
+        return Response({
+            'message': 'Image deleted successfully'
+        }, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except StoryAsset.DoesNotExist:
+        return Response(
+            {'error': 'Asset not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except AssetImage.DoesNotExist:
+        return Response(
+            {'error': 'Image not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error deleting image: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ==================== Character Detail & Management APIs ====================
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def character_detail(request, story_id, character_id):
+    """
+    Get character details
+    GET /api/ai-machines/stories/{story_id}/characters/{character_id}/
+    
+    Returns:
+    {
+        "id": 1,
+        "name": "Mara",
+        "role": "protagonist",
+        "description": "Main character...",
+        "appearances": 10,
+        "story_id": 1,
+        "story_title": "My Story",
+        "images": [...]
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        character = get_object_or_404(Character, id=character_id, story=story)
+        
+        # Get character images
+        images = CharacterImage.objects.filter(character=character)
+        images_data = []
+        for img in images:
+            images_data.append({
+                'id': img.id,
+                'image_url': request.build_absolute_uri(img.image.url) if img.image else None,
+                'image_type': img.image_type,
+                'description': img.description,
+                'created_at': img.created_at.isoformat(),
+            })
+        
+        character_data = {
+            'id': character.id,
+            'name': character.name,
+            'role': character.role,
+            'description': character.description,
+            'appearances': character.appearances,
+            'story_id': story.id,
+            'story_title': story.title,
+            'images': images_data,
+        }
+        
+        return Response(character_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Character.DoesNotExist:
+        return Response(
+            {'error': 'Character not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error fetching character: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def character_update(request, story_id, character_id):
+    """
+    Update character details
+    PATCH /api/ai-machines/stories/{story_id}/characters/{character_id}/
+    
+    Body:
+    {
+        "name": "Updated Name",
+        "description": "Updated description",
+        "role": "protagonist"
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        character = get_object_or_404(Character, id=character_id, story=story)
+        
+        # Update fields if provided
+        if 'name' in request.data:
+            character.name = request.data['name'][:255]
+        if 'description' in request.data:
+            character.description = request.data['description']
+        if 'role' in request.data:
+            character.role = request.data['role'][:100]
+        
+        character.save()
+        
+        # Sync story.parsed_data with updated character data
+        sync_story_parsed_data(story)
+        
+        character_data = {
+            'id': character.id,
+            'name': character.name,
+            'role': character.role,
+            'description': character.description,
+            'appearances': character.appearances,
+        }
+        
+        return Response(character_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Character.DoesNotExist:
+        return Response(
+            {'error': 'Character not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error updating character: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def character_upload_images(request, story_id, character_id):
+    """
+    Upload images for a character
+    POST /api/ai-machines/stories/{story_id}/characters/{character_id}/upload-images/
+    
+    Body (multipart/form-data):
+    - images[]: file1, file2, ...
+    - description: "Optional description"
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        character = get_object_or_404(Character, id=character_id, story=story)
+        
+        uploaded_files = request.FILES.getlist('images')
+        description = request.data.get('description', '')
+        
+        if not uploaded_files:
+            return Response(
+                {'error': 'No images provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        created_images = []
+        for image_file in uploaded_files:
+            # Validate file type
+            if not image_file.content_type.startswith('image/'):
+                continue
+            
+            character_image = CharacterImage.objects.create(
+                character=character,
+                image=image_file,
+                image_type='uploaded',
+                description=description,
+                uploaded_by=request.user
+            )
+            
+            created_images.append({
+                'id': character_image.id,
+                'image_url': request.build_absolute_uri(character_image.image.url),
+                'image_type': character_image.image_type,
+                'description': character_image.description,
+                'created_at': character_image.created_at.isoformat(),
+            })
+        
+        if not created_images:
+            return Response(
+                {'error': 'No valid images uploaded'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return Response({
+            'message': f'Successfully uploaded {len(created_images)} image(s)',
+            'images': created_images
+        }, status=status.HTTP_201_CREATED)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Character.DoesNotExist:
+        return Response(
+            {'error': 'Character not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error uploading images: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def character_delete_image(request, story_id, character_id, image_id):
+    """
+    Delete a character image
+    DELETE /api/ai-machines/stories/{story_id}/characters/{character_id}/images/{image_id}/
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        character = get_object_or_404(Character, id=character_id, story=story)
+        image = get_object_or_404(CharacterImage, id=image_id, character=character)
+        
+        image.delete()
+        
+        return Response({
+            'message': 'Image deleted successfully'
+        }, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Character.DoesNotExist:
+        return Response(
+            {'error': 'Character not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except CharacterImage.DoesNotExist:
+        return Response(
+            {'error': 'Image not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error deleting image: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ==================== Location Detail & Management APIs ====================
+
+# ==================== Location Detail & Management APIs ====================
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def location_detail(request, story_id, location_id):
+    """
+    Get location details
+    GET /api/ai-machines/stories/{story_id}/locations/{location_id}/
+    
+    Returns:
+    {
+        "id": 1,
+        "name": "Forest",
+        "description": "A dark forest...",
+        "location_type": "outdoor",
+        "scenes": 5,
+        "story_id": 1,
+        "story_title": "My Story",
+        "images": [...]
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        location = get_object_or_404(Location, id=location_id, story=story)
+        
+        # Get location images
+        images = LocationImage.objects.filter(location=location)
+        images_data = []
+        for img in images:
+            images_data.append({
+                'id': img.id,
+                'image_url': request.build_absolute_uri(img.image.url) if img.image else None,
+                'image_type': img.image_type,
+                'description': img.description,
+                'created_at': img.created_at.isoformat(),
+            })
+        
+        location_data = {
+            'id': location.id,
+            'name': location.name,
+            'description': location.description,
+            'location_type': location.location_type,
+            'scenes': location.scenes,
+            'story_id': story.id,
+            'story_title': story.title,
+            'images': images_data,
+        }
+        
+        return Response(location_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Location.DoesNotExist:
+        return Response(
+            {'error': 'Location not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error fetching location: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def location_update(request, story_id, location_id):
+    """
+    Update location details
+    PATCH /api/ai-machines/stories/{story_id}/locations/{location_id}/update/
+    
+    Body:
+    {
+        "name": "Updated Name",
+        "description": "Updated description",
+        "location_type": "indoor",
+        "scenes": 10
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        location = get_object_or_404(Location, id=location_id, story=story)
+        
+        # Update fields if provided
+        if 'name' in request.data:
+            location.name = request.data['name'][:255]
+        if 'description' in request.data:
+            location.description = request.data['description']
+        if 'location_type' in request.data:
+            location.location_type = request.data['location_type'][:100]
+        if 'scenes' in request.data:
+            location.scenes = request.data['scenes']
+        
+        location.save()
+        
+        # Sync story.parsed_data with updated location data
+        sync_story_parsed_data(story)
+        
+        location_data = {
+            'id': location.id,
+            'name': location.name,
+            'description': location.description,
+            'location_type': location.location_type,
+            'scenes': location.scenes,
+        }
+        
+        return Response(location_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Location.DoesNotExist:
+        return Response(
+            {'error': 'Location not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error updating location: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def location_upload_images(request, story_id, location_id):
+    """
+    Upload images for a location
+    POST /api/ai-machines/stories/{story_id}/locations/{location_id}/upload-images/
+    
+    Body (multipart/form-data):
+    - images[]: file1, file2, ...
+    - description: "Optional description"
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        location = get_object_or_404(Location, id=location_id, story=story)
+        
+        uploaded_files = request.FILES.getlist('images')
+        description = request.data.get('description', '')
+        
+        if not uploaded_files:
+            return Response(
+                {'error': 'No images provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        created_images = []
+        for image_file in uploaded_files:
+            # Validate file type
+            if not image_file.content_type.startswith('image/'):
+                continue
+            
+            location_image = LocationImage.objects.create(
+                location=location,
+                image=image_file,
+                image_type='uploaded',
+                description=description,
+                uploaded_by=request.user
+            )
+            
+            created_images.append({
+                'id': location_image.id,
+                'image_url': request.build_absolute_uri(location_image.image.url),
+                'image_type': location_image.image_type,
+                'description': location_image.description,
+                'created_at': location_image.created_at.isoformat(),
+            })
+        
+        if not created_images:
+            return Response(
+                {'error': 'No valid images uploaded'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return Response({
+            'message': f'Successfully uploaded {len(created_images)} image(s)',
+            'images': created_images
+        }, status=status.HTTP_201_CREATED)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Location.DoesNotExist:
+        return Response(
+            {'error': 'Location not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error uploading images: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def location_delete_image(request, story_id, location_id, image_id):
+    """
+    Delete a location image
+    DELETE /api/ai-machines/stories/{story_id}/locations/{location_id}/images/{image_id}/
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        location = get_object_or_404(Location, id=location_id, story=story)
+        image = get_object_or_404(LocationImage, id=image_id, location=location)
+        
+        image.delete()
+        
+        return Response({
+            'message': 'Image deleted successfully'
+        }, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Location.DoesNotExist:
+        return Response(
+            {'error': 'Location not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except LocationImage.DoesNotExist:
+        return Response(
+            {'error': 'Image not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error deleting image: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+# ==================== Sequence Detail & Management APIs ====================
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def sequence_detail(request, story_id, sequence_id):
+    """
+    Get sequence details
+    GET /api/ai-machines/stories/{story_id}/sequences/{sequence_id}/
+    
+    Returns:
+    {
+        "id": 1,
+        "sequence_number": 1,
+        "title": "Opening Scene",
+        "description": "The story begins...",
+        "location": {"id": 1, "name": "Forest"},
+        "characters": [{"id": 1, "name": "Hero"}],
+        "estimated_time": "2-3 minutes",
+        "total_shots": 5,
+        "estimated_cost": 5000.00,
+        "story_id": 1,
+        "story_title": "My Story"
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        sequence = get_object_or_404(Sequence, id=sequence_id, story=story)
+        
+        # Get location data
+        location_data = None
+        if sequence.location:
+            location_data = {
+                'id': sequence.location.id,
+                'name': sequence.location.name,
+            }
+        
+        # Get characters data
+        characters_data = []
+        for char in sequence.characters.all():
+            characters_data.append({
+                'id': char.id,
+                'name': char.name,
+            })
+        
+        sequence_data = {
+            'id': sequence.id,
+            'sequence_number': sequence.sequence_number,
+            'title': sequence.title,
+            'description': sequence.description,
+            'location': location_data,
+            'characters': characters_data,
+            'estimated_time': sequence.estimated_time,
+            'total_shots': sequence.total_shots,
+            'estimated_cost': float(sequence.estimated_cost) if sequence.estimated_cost else None,
+            'story_id': story.id,
+            'story_title': story.title,
+        }
+        
+        return Response(sequence_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Sequence.DoesNotExist:
+        return Response(
+            {'error': 'Sequence not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error fetching sequence: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def sequence_update(request, story_id, sequence_id):
+    """
+    Update sequence details
+    PATCH /api/ai-machines/stories/{story_id}/sequences/{sequence_id}/update/
+    
+    Body:
+    {
+        "title": "Updated Title",
+        "description": "Updated description",
+        "location_id": 1,
+        "character_ids": [1, 2],
+        "estimated_time": "3-4 minutes"
+    }
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        sequence = get_object_or_404(Sequence, id=sequence_id, story=story)
+        
+        # Update fields if provided
+        if 'title' in request.data:
+            sequence.title = request.data['title'][:255]
+        if 'description' in request.data:
+            sequence.description = request.data['description']
+        if 'estimated_time' in request.data:
+            sequence.estimated_time = request.data['estimated_time'][:100]
+        
+        # Update location if provided
+        if 'location_id' in request.data:
+            location_id = request.data['location_id']
+            if location_id:
+                location = Location.objects.filter(id=location_id, story=story).first()
+                sequence.location = location
+            else:
+                sequence.location = None
+        
+        # Update characters if provided
+        if 'character_ids' in request.data:
+            character_ids = request.data['character_ids']
+            characters = Character.objects.filter(id__in=character_ids, story=story)
+            sequence.characters.set(characters)
+        
+        sequence.save()
+        
+        # Sync story.parsed_data with updated sequence data
+        sync_story_parsed_data(story)
+        
+        # Get updated location and characters data
+        location_data = None
+        if sequence.location:
+            location_data = {
+                'id': sequence.location.id,
+                'name': sequence.location.name,
+            }
+        
+        characters_data = []
+        for char in sequence.characters.all():
+            characters_data.append({
+                'id': char.id,
+                'name': char.name,
+            })
+        
+        sequence_data = {
+            'id': sequence.id,
+            'sequence_number': sequence.sequence_number,
+            'title': sequence.title,
+            'description': sequence.description,
+            'location': location_data,
+            'characters': characters_data,
+            'estimated_time': sequence.estimated_time,
+            'total_shots': sequence.total_shots,
+            'estimated_cost': float(sequence.estimated_cost) if sequence.estimated_cost else None,
+        }
+        
+        return Response(sequence_data, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Sequence.DoesNotExist:
+        return Response(
+            {'error': 'Sequence not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error updating sequence: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

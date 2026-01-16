@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (
-    Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat
+    Story, Character, Location, StoryAsset, Sequence, Shot, ArtControlSettings, Chat, AssetImage, CharacterImage, LocationImage
 )
 
 
@@ -80,3 +80,27 @@ class ChatAdmin(admin.ModelAdmin):
     list_filter = ['created_at', 'updated_at']
     search_fields = ['title', 'user__username']
     readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(AssetImage)
+class AssetImageAdmin(admin.ModelAdmin):
+    list_display = ['id', 'asset', 'image_type', 'uploaded_by', 'created_at']
+    list_filter = ['image_type', 'created_at']
+    search_fields = ['asset__name', 'description']
+    readonly_fields = ['created_at']
+
+
+@admin.register(CharacterImage)
+class CharacterImageAdmin(admin.ModelAdmin):
+    list_display = ['id', 'character', 'image_type', 'uploaded_by', 'created_at']
+    list_filter = ['image_type', 'created_at']
+    search_fields = ['character__name', 'description']
+    readonly_fields = ['created_at']
+
+
+@admin.register(LocationImage)
+class LocationImageAdmin(admin.ModelAdmin):
+    list_display = ['id', 'location', 'image_type', 'uploaded_by', 'created_at']
+    list_filter = ['image_type', 'created_at']
+    search_fields = ['location__name', 'description']
+    readonly_fields = ['created_at']

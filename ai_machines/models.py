@@ -76,6 +76,72 @@ class StoryAsset(models.Model):
         return f"{self.name} ({self.story.title})"
 
 
+class AssetImage(models.Model):
+    """Images uploaded or generated for assets"""
+    IMAGE_TYPES = [
+        ('uploaded', 'Uploaded'),
+        ('generated', 'Generated'),
+    ]
+    
+    asset = models.ForeignKey(StoryAsset, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='assets/images/%Y/%m/%d/')
+    image_type = models.CharField(max_length=20, choices=IMAGE_TYPES, default='uploaded')
+    description = models.TextField(blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'asset_images'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.asset.name} - {self.image_type} - {self.created_at.strftime('%Y-%m-%d')}"
+
+
+class CharacterImage(models.Model):
+    """Images uploaded or generated for characters"""
+    IMAGE_TYPES = [
+        ('uploaded', 'Uploaded'),
+        ('generated', 'Generated'),
+    ]
+    
+    character = models.ForeignKey(Character, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='characters/images/%Y/%m/%d/')
+    image_type = models.CharField(max_length=20, choices=IMAGE_TYPES, default='uploaded')
+    description = models.TextField(blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'character_images'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.character.name} - {self.image_type} - {self.created_at.strftime('%Y-%m-%d')}"
+
+
+class LocationImage(models.Model):
+    """Images uploaded or generated for locations"""
+    IMAGE_TYPES = [
+        ('uploaded', 'Uploaded'),
+        ('generated', 'Generated'),
+    ]
+    
+    location = models.ForeignKey(Location, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='locations/images/%Y/%m/%d/')
+    image_type = models.CharField(max_length=20, choices=IMAGE_TYPES, default='uploaded')
+    description = models.TextField(blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'location_images'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.location.name} - {self.image_type} - {self.created_at.strftime('%Y-%m-%d')}"
+
+
 class Sequence(models.Model):
     """Sequence extracted from story - A sequence contains multiple shots"""
     story = models.ForeignKey(Story, on_delete=models.CASCADE, related_name='sequences')
