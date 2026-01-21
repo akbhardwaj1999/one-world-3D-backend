@@ -46,16 +46,51 @@ def sync_story_parsed_data(story):
     if 'assets' in parsed_data:
         for asset_data in parsed_data['assets']:
             asset_id = asset_data.get('id')
+            db_asset = None
+            
+            # Try to find asset by ID first
             if asset_id:
                 try:
                     db_asset = StoryAsset.objects.get(id=asset_id, story=story)
-                    asset_data['name'] = db_asset.name
-                    asset_data['description'] = db_asset.description
-                    asset_data['complexity'] = db_asset.complexity
-                    if db_asset.estimated_cost:
-                        asset_data['estimated_cost'] = float(db_asset.estimated_cost)
                 except StoryAsset.DoesNotExist:
                     pass
+            
+            # If not found by ID, try to find by name and type
+            if not db_asset:
+                asset_name = asset_data.get('name', '').strip()
+                asset_type = asset_data.get('type', '').strip()
+                if asset_name:
+                    try:
+                        # Try exact match first
+                        db_asset = StoryAsset.objects.filter(
+                            story=story,
+                            name__iexact=asset_name
+                        ).first()
+                        
+                        # If not found, try case-insensitive partial match
+                        if not db_asset:
+                            db_asset = StoryAsset.objects.filter(
+                                story=story,
+                                name__icontains=asset_name
+                            ).first()
+                        
+                        # If still not found and type matches, try by type
+                        if not db_asset and asset_type:
+                            db_asset = StoryAsset.objects.filter(
+                                story=story,
+                                asset_type__iexact=asset_type
+                            ).first()
+                    except Exception:
+                        pass
+            
+            # Update asset_data if found
+            if db_asset:
+                asset_data['id'] = db_asset.id
+                asset_data['name'] = db_asset.name
+                asset_data['description'] = db_asset.description
+                asset_data['complexity'] = db_asset.complexity
+                if db_asset.estimated_cost:
+                    asset_data['estimated_cost'] = float(db_asset.estimated_cost)
     
     # Update locations in parsed_data
     if 'locations' in parsed_data:
@@ -422,6 +457,369 @@ def parse_story(request):
         )
 
 
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def regenerate_story(request, story_id):
+    """
+    Regenerate story with updated character/asset/location data
+    POST /api/ai-machines/stories/{story_id}/regenerate/
+    
+    This will:
+    1. Get original story.raw_text
+    2. Get updated data from database (characters, assets, locations)
+    3. Create enhanced story text with updated descriptions
+    4. Re-parse story with AI
+    5. Update existing database records (preserve IDs)
+    6. Update story.parsed_data
+    """
+    try:
+        story = get_object_or_404(Story, id=story_id, user=request.user)
+        
+        # Get original story text
+        original_text = story.raw_text
+        
+        if not original_text:
+            return Response(
+                {'error': 'Story has no raw text to regenerate'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get updated data from database
+        db_characters = Character.objects.filter(story=story)
+        db_assets = StoryAsset.objects.filter(story=story)
+        db_locations = Location.objects.filter(story=story)
+        
+        # Create enhanced story text with updated character/asset descriptions
+        # This helps AI understand the updated context
+        enhancement_parts = []
+        
+        if db_characters.exists():
+            enhancement_parts.append("\n\nUPDATED CHARACTER INFORMATION:")
+            for char in db_characters:
+                enhancement_parts.append(
+                    f"- {char.name}: {char.description} (Role: {char.role})"
+                )
+        
+        if db_assets.exists():
+            enhancement_parts.append("\n\nUPDATED ASSET INFORMATION:")
+            for asset in db_assets:
+                enhancement_parts.append(
+                    f"- {asset.name} ({asset.asset_type}): {asset.description} (Complexity: {asset.complexity})"
+                )
+        
+        if db_locations.exists():
+            enhancement_parts.append("\n\nUPDATED LOCATION INFORMATION:")
+            for loc in db_locations:
+                enhancement_parts.append(
+                    f"- {loc.name}: {loc.description} (Type: {loc.location_type})"
+                )
+        
+        # Combine original text with enhancements
+        enhanced_text = original_text + "\n\n" + "\n".join(enhancement_parts)
+        
+        # Re-parse story using AI with enhanced text
+        parsed_data = parse_story_to_structured_data(enhanced_text)
+        
+        if 'error' in parsed_data and parsed_data.get('error'):
+            return Response(
+                {'error': parsed_data['error']},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        # Update story metadata
+        story.title = parsed_data.get('summary', story.title)[:255]
+        story.summary = parsed_data.get('summary', story.summary)
+        story.total_shots = parsed_data.get('total_shots', story.total_shots)
+        story.estimated_total_time = parsed_data.get('estimated_total_time', story.estimated_total_time)
+        
+        # Update existing characters (match by ID or name, preserve IDs)
+        existing_characters = {c.id: c for c in db_characters}
+        existing_characters_by_name = {c.name: c for c in db_characters}
+        characters_dict = {}
+        
+        for char_data in parsed_data.get('characters', []):
+            char_name = char_data.get('name', '').strip()
+            if not char_name:
+                continue
+            
+            # Try to find existing character by name (case-insensitive)
+            existing_char = None
+            for db_char in db_characters:
+                if db_char.name.lower() == char_name.lower():
+                    existing_char = db_char
+                    break
+            
+            if existing_char:
+                # Update existing character
+                existing_char.name = char_name[:255]
+                existing_char.description = char_data.get('description', existing_char.description)
+                existing_char.role = char_data.get('role', existing_char.role)[:100]
+                existing_char.appearances = char_data.get('appearances', existing_char.appearances)
+                existing_char.save()
+                characters_dict[char_name] = existing_char
+            else:
+                # Create new character if not found
+                new_char = Character.objects.create(
+                    story=story,
+                    name=char_name[:255],
+                    description=char_data.get('description', ''),
+                    role=char_data.get('role', 'supporting')[:100],
+                    appearances=char_data.get('appearances', 0)
+                )
+                characters_dict[char_name] = new_char
+        
+        # Update existing locations (match by name, preserve IDs)
+        existing_locations_by_name = {loc.name: loc for loc in db_locations}
+        locations_dict = {}
+        
+        for loc_data in parsed_data.get('locations', []):
+            loc_name = loc_data.get('name', '').strip()
+            if not loc_name:
+                continue
+            
+            # Try to find existing location by name (case-insensitive)
+            existing_loc = None
+            for db_loc in db_locations:
+                if db_loc.name.lower() == loc_name.lower():
+                    existing_loc = db_loc
+                    break
+            
+            if existing_loc:
+                # Update existing location
+                existing_loc.name = loc_name[:255]
+                existing_loc.description = loc_data.get('description', existing_loc.description)
+                existing_loc.location_type = loc_data.get('type', existing_loc.location_type)[:100]
+                existing_loc.scenes = loc_data.get('scenes', existing_loc.scenes)
+                existing_loc.save()
+                locations_dict[loc_name] = existing_loc
+            else:
+                # Create new location if not found
+                new_loc = Location.objects.create(
+                    story=story,
+                    name=loc_name[:255],
+                    description=loc_data.get('description', ''),
+                    location_type=loc_data.get('type', 'outdoor')[:100],
+                    scenes=loc_data.get('scenes', 0)
+                )
+                locations_dict[loc_name] = new_loc
+        
+        # Update existing assets (match by name+type, preserve IDs)
+        existing_assets_by_key = {}
+        for asset in db_assets:
+            key = f"{asset.name}_{asset.asset_type}".lower()
+            existing_assets_by_key[key] = asset
+        
+        assets_dict = {}
+        
+        for asset_data in parsed_data.get('assets', []):
+            asset_name = asset_data.get('name', '').strip()
+            asset_type = asset_data.get('type', 'prop').strip()
+            if not asset_name:
+                continue
+            
+            asset_key = f"{asset_name}_{asset_type}".lower()
+            
+            # Try to find existing asset
+            existing_asset = existing_assets_by_key.get(asset_key)
+            
+            if existing_asset:
+                # Update existing asset
+                existing_asset.name = asset_name[:255]
+                existing_asset.description = asset_data.get('description', existing_asset.description)
+                existing_asset.complexity = asset_data.get('complexity', existing_asset.complexity)[:20]
+                existing_asset.estimated_cost = calculate_asset_cost(existing_asset)
+                existing_asset.save()
+                assets_dict[asset_key] = existing_asset
+            else:
+                # Create new asset if not found
+                new_asset = StoryAsset.objects.create(
+                    story=story,
+                    name=asset_name[:255],
+                    asset_type=asset_type[:50],
+                    description=asset_data.get('description', ''),
+                    complexity=asset_data.get('complexity', 'medium')[:20]
+                )
+                new_asset.estimated_cost = calculate_asset_cost(new_asset)
+                new_asset.save()
+                assets_dict[asset_key] = new_asset
+        
+        # Delete sequences and shots (we'll recreate them)
+        # This ensures clean regeneration
+        Shot.objects.filter(story=story).delete()
+        Sequence.objects.filter(story=story).delete()
+        
+        # Recreate sequences
+        sequences_dict = {}
+        sequences_with_ids = {}
+        
+        for seq_data in parsed_data.get('sequences', []):
+            location = None
+            location_name = seq_data.get('location', '')
+            if location_name and location_name in locations_dict:
+                location = locations_dict[location_name]
+            
+            sequence = Sequence.objects.create(
+                story=story,
+                sequence_number=seq_data.get('sequence_number', 1),
+                title=seq_data.get('title', '')[:255],
+                description=seq_data.get('description', ''),
+                location=location,
+                estimated_time=seq_data.get('estimated_time', '')[:100],
+                total_shots=seq_data.get('total_shots', 0)
+            )
+            
+            # Link characters to sequence
+            char_names = seq_data.get('characters', [])
+            if char_names:
+                sequence_chars = []
+                for char_name in char_names:
+                    if char_name in characters_dict:
+                        sequence_chars.append(characters_dict[char_name])
+                sequence.characters.set(sequence_chars)
+            
+            seq_num = seq_data.get('sequence_number', 1)
+            sequences_dict[seq_num] = sequence
+            sequences_with_ids[seq_num] = sequence.id
+        
+        # Recreate shots
+        shots_with_ids = {}
+        
+        for shot_data in parsed_data.get('shots', []):
+            location = None
+            location_name = shot_data.get('location', '')
+            if location_name and location_name in locations_dict:
+                location = locations_dict[location_name]
+            
+            sequence = None
+            sequence_number = shot_data.get('sequence_number')
+            if sequence_number and sequence_number in sequences_dict:
+                sequence = sequences_dict[sequence_number]
+            
+            shot = Shot.objects.create(
+                story=story,
+                sequence=sequence,
+                shot_number=shot_data.get('shot_number', 1),
+                description=shot_data.get('description', ''),
+                location=location,
+                camera_angle=shot_data.get('camera_angle', '')[:100],
+                complexity=shot_data.get('complexity', 'medium')[:20],
+                estimated_time=shot_data.get('estimated_time', '')[:100],
+                special_requirements=shot_data.get('special_requirements', [])
+            )
+            
+            shot.estimated_cost = calculate_shot_cost(shot)
+            shot.save()
+            
+            # Link characters to shot
+            char_names = shot_data.get('characters', [])
+            if char_names:
+                shot_chars = []
+                for char_name in char_names:
+                    if char_name in characters_dict:
+                        shot_chars.append(characters_dict[char_name])
+                shot.characters.set(shot_chars)
+            
+            shot_num = shot_data.get('shot_number', 1)
+            shots_with_ids[shot_num] = shot.id
+        
+        # Calculate costs
+        for sequence in sequences_dict.values():
+            sequence.estimated_cost = calculate_sequence_cost(sequence)
+            sequence.save()
+        
+        story.total_estimated_cost = calculate_story_total_cost(story)
+        story.budget_range = get_budget_range(story.total_estimated_cost)
+        
+        # Update parsed_data with IDs and costs
+        import copy
+        enhanced_parsed_data = copy.deepcopy(parsed_data)
+        
+        # Add IDs to characters
+        for char_data in enhanced_parsed_data.get('characters', []):
+            char_name = char_data.get('name', '')
+            if char_name in characters_dict:
+                char_data['id'] = characters_dict[char_name].id
+        
+        # Add IDs to locations
+        for loc_data in enhanced_parsed_data.get('locations', []):
+            loc_name = loc_data.get('name', '')
+            if loc_name in locations_dict:
+                loc_data['id'] = locations_dict[loc_name].id
+        
+        # Add IDs to assets
+        for asset_data in enhanced_parsed_data.get('assets', []):
+            asset_name = asset_data.get('name', '')
+            asset_type = asset_data.get('type', 'prop')
+            asset_key = f"{asset_name}_{asset_type}".lower()
+            if asset_key in assets_dict:
+                asset_data['id'] = assets_dict[asset_key].id
+                if assets_dict[asset_key].estimated_cost:
+                    asset_data['estimated_cost'] = float(assets_dict[asset_key].estimated_cost)
+        
+        # Add IDs to sequences
+        for seq in enhanced_parsed_data.get('sequences', []):
+            seq_num = seq.get('sequence_number', 1)
+            if seq_num in sequences_with_ids:
+                seq['id'] = sequences_with_ids[seq_num]
+        
+        # Add IDs to shots
+        for shot in enhanced_parsed_data.get('shots', []):
+            shot_num = shot.get('shot_number', 1)
+            if shot_num in shots_with_ids:
+                shot['id'] = shots_with_ids[shot_num]
+        
+        # Add costs
+        enhanced_parsed_data['total_estimated_cost'] = float(story.total_estimated_cost) if story.total_estimated_cost else None
+        enhanced_parsed_data['budget_range'] = story.budget_range
+        
+        for shot in enhanced_parsed_data.get('shots', []):
+            shot_obj = Shot.objects.filter(story=story, shot_number=shot.get('shot_number')).first()
+            if shot_obj and shot_obj.estimated_cost:
+                shot['estimated_cost'] = float(shot_obj.estimated_cost)
+        
+        for seq in enhanced_parsed_data.get('sequences', []):
+            seq_obj = Sequence.objects.filter(story=story, sequence_number=seq.get('sequence_number')).first()
+            if seq_obj and seq_obj.estimated_cost:
+                seq['estimated_cost'] = float(seq_obj.estimated_cost)
+        
+        # Save updated parsed_data
+        story.parsed_data = enhanced_parsed_data
+        story.save()
+        
+        # Return updated story data
+        story_data = {
+            'id': story.id,
+            'title': story.title,
+            'raw_text': story.raw_text,
+            'summary': story.summary,
+            'parsed_data': enhanced_parsed_data,
+            'total_shots': story.total_shots,
+            'total_estimated_cost': float(story.total_estimated_cost) if story.total_estimated_cost else None,
+            'budget_range': story.budget_range,
+            'estimated_total_time': story.estimated_total_time,
+            'created_at': story.created_at.isoformat() if story.created_at else None,
+            'updated_at': story.updated_at.isoformat() if story.updated_at else None,
+        }
+        
+        return Response({
+            'message': 'Story regenerated successfully',
+            'story': story_data
+        }, status=status.HTTP_200_OK)
+        
+    except Story.DoesNotExist:
+        return Response(
+            {'error': 'Story not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return Response(
+            {'error': f'Error regenerating story: {str(e)}', 'trace': error_trace if settings.DEBUG else None},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def story_list(request):
@@ -589,19 +987,82 @@ def story_detail(request, story_id):
         
         # Add IDs and costs to assets in parsed_data from database
         assets_in_parsed = parsed_data.get('assets', [])
+        
+        # Get all assets for this story to match by ID or name
+        all_db_assets = {a.id: a for a in StoryAsset.objects.filter(story=story)}
+        all_db_assets_list = list(all_db_assets.values())
+        
+        # Track which database assets have been assigned
+        assigned_db_assets = set()
+        
         for asset_data in assets_in_parsed:
-            asset_name = asset_data.get('name', '')
-            asset_type = asset_data.get('type', '')
-            # Find matching asset in database
-            db_asset = StoryAsset.objects.filter(
-                story=story,
-                name=asset_name,
-                asset_type=asset_type
-            ).first()
-            if db_asset:
-                asset_data['id'] = db_asset.id  # Add asset ID
+            asset_id = asset_data.get('id')
+            db_asset = None
+            
+            # First check if ID already exists and verify it's still valid
+            if asset_id and asset_id in all_db_assets:
+                # ID exists and is valid, update the data from database
+                db_asset = all_db_assets[asset_id]
+                asset_data['name'] = db_asset.name
+                asset_data['description'] = db_asset.description
+                asset_data['complexity'] = db_asset.complexity
                 if db_asset.estimated_cost:
                     asset_data['estimated_cost'] = float(db_asset.estimated_cost)
+                assigned_db_assets.add(db_asset.id)
+                continue
+            
+            # If no valid ID, try to find by name and type
+            asset_name = asset_data.get('name', '').strip()
+            asset_type = asset_data.get('type', '').strip()
+            
+            if not asset_name:
+                continue
+            
+            # Try exact match first (name + type)
+            if asset_type:
+                db_asset = StoryAsset.objects.filter(
+                    story=story,
+                    name__iexact=asset_name,
+                    asset_type__iexact=asset_type
+                ).exclude(id__in=assigned_db_assets).first()
+            
+            # If not found, try case-insensitive name match (ignore type)
+            if not db_asset:
+                db_asset = StoryAsset.objects.filter(
+                    story=story,
+                    name__iexact=asset_name
+                ).exclude(id__in=assigned_db_assets).first()
+            
+            # If still not found, try partial name match
+            if not db_asset:
+                db_asset = StoryAsset.objects.filter(
+                    story=story,
+                    name__icontains=asset_name
+                ).exclude(id__in=assigned_db_assets).first()
+            
+            # If still not found and type matches, try by type only
+            if not db_asset and asset_type:
+                db_asset = StoryAsset.objects.filter(
+                    story=story,
+                    asset_type__iexact=asset_type
+                ).exclude(id__in=assigned_db_assets).first()
+            
+            # Last resort: use first available unassigned asset
+            if not db_asset and len(all_db_assets_list) > 0:
+                for db_asset_candidate in all_db_assets_list:
+                    if db_asset_candidate.id not in assigned_db_assets:
+                        db_asset = db_asset_candidate
+                        break
+            
+            # Update asset_data if found
+            if db_asset:
+                asset_data['id'] = db_asset.id  # Add asset ID
+                asset_data['name'] = db_asset.name
+                asset_data['description'] = db_asset.description
+                asset_data['complexity'] = db_asset.complexity
+                if db_asset.estimated_cost:
+                    asset_data['estimated_cost'] = float(db_asset.estimated_cost)
+                assigned_db_assets.add(db_asset.id)
         
         # Add IDs to locations in parsed_data from database
         locations_in_parsed = parsed_data.get('locations', [])
@@ -1773,7 +2234,6 @@ def character_delete_image(request, story_id, character_id, image_id):
 
 # ==================== Location Detail & Management APIs ====================
 
-# ==================== Location Detail & Management APIs ====================
 
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
